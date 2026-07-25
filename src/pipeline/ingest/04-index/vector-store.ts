@@ -44,6 +44,34 @@ export interface VectorRow {
   vector: number[];
 }
 
+/**
+ * The reverse of `toVectorRow` — reconstructs a `Chunk` from a stored row,
+ * turning the `''`-sentinel back into `undefined` for fields that are
+ * genuinely optional on `Chunk` (see `toVectorRow`'s own doc comment for why
+ * the sentinel exists in the first place). Used to rebuild `repoChunks` for a
+ * repoId the API process doesn't have in memory (e.g. after a restart) without
+ * re-cloning/re-chunking/re-embedding — the index on disk already has
+ * everything Expand's symbol graph needs.
+ */
+export function vectorRowToChunk(row: VectorRow): Chunk {
+  return {
+    id: row.id,
+    repoId: row.repoId,
+    filePath: row.filePath,
+    kind: row.kind as Chunk['kind'],
+    language: row.language ? (row.language as Chunk['language']) : undefined,
+    configFormat: row.configFormat || undefined,
+    symbolName: row.symbolName,
+    symbolType: row.symbolType as Chunk['symbolType'],
+    parentSymbol: row.parentSymbol || undefined,
+    startLine: row.startLine,
+    endLine: row.endLine,
+    content: row.content,
+    contentHash: row.contentHash,
+    commitSha: row.commitSha || undefined,
+  };
+}
+
 export function toVectorRow(chunk: Chunk, embedding: EmbeddedChunk): VectorRow {
   return {
     id: chunk.id,
@@ -66,6 +94,31 @@ export function toVectorRow(chunk: Chunk, embedding: EmbeddedChunk): VectorRow {
 
 export function openVectorStore(dbPath: string = DEFAULT_DB_PATH): Promise<lancedb.Connection> {
   return lancedb.connect(dbPath);
+}
+
+const connectionCache = new Map<string, Promise<lancedb.Connection>>();
+
+/**
+ * Read-path callers (Retrieve, Rerank) call this instead of `openVectorStore` —
+ * every hop of a query loop was reopening a fresh connection for no reason,
+ * since `searchVectors`/`getVectorsByIds` always `openTable()` fresh anyway (so
+ * they see current data regardless of when the connection was made). Write
+ * callers (`indexRepo`) still use `openVectorStore` directly, unaffected.
+ * A failed connect is never cached — the next call retries instead of
+ * repeating the same rejection forever.
+ */
+export function getSharedVectorStore(
+  dbPath: string = DEFAULT_DB_PATH,
+): Promise<lancedb.Connection> {
+  let cached = connectionCache.get(dbPath);
+  if (!cached) {
+    cached = openVectorStore(dbPath).catch((err: unknown) => {
+      connectionCache.delete(dbPath);
+      throw err;
+    });
+    connectionCache.set(dbPath, cached);
+  }
+  return cached;
 }
 
 /**

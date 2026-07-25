@@ -8,6 +8,11 @@ import { chunkRepo } from '../pipeline/ingest/02-chunk/chunk.ts';
 import { cloneRepo } from '../pipeline/ingest/01-clone/clone.ts';
 import { embedChunks } from '../pipeline/ingest/03-embed/embed.ts';
 import { indexRepo } from '../pipeline/ingest/04-index/index.ts';
+import {
+  indexPath,
+  invalidateCachedLexicalIndex,
+} from '../pipeline/ingest/04-index/lexical-store.ts';
+import { invalidateAskCache } from './ask-stream.ts';
 import { repoChunks } from './repo-cache.ts';
 
 export type EmitFn = (event: string, data: unknown) => void;
@@ -32,6 +37,14 @@ export async function runIndexStream(
 
     emit('step', { stage: 'index', message: 'writing to the vector + lexical stores…' });
     const indexResult = await indexRepo(clone.repoId, chunks, embeddings);
+
+    // Retrieve caches the loaded lexical index across query hops for speed
+    // (see lexical-store.ts's getCachedLexicalIndex) — bust it now so the next
+    // question against this repoId sees what was just written, not a stale copy.
+    invalidateCachedLexicalIndex(indexPath(clone.repoId));
+    // Same reasoning for cached /ask answers (see ask-stream.ts's askCache) —
+    // a re-index means old cached answers no longer reflect the real content.
+    invalidateAskCache(clone.repoId);
 
     repoChunks.set(clone.repoId, chunks);
 

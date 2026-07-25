@@ -302,6 +302,40 @@ button.primary:disabled {
   color: var(--bad);
 }
 
+.pill-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.pill {
+  font-size: 0.76rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pill:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pill-active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--bg-panel-2);
+}
+
 .badge {
   display: inline-block;
   font-size: 0.72rem;

@@ -10,18 +10,28 @@ via `.inject()` without a real port. `scripts/serve.ts` is the thin entrypoint t
 
 ## Routes
 
-| Route     | Method | Body                                                     | Response                                               |
-| --------- | ------ | -------------------------------------------------------- | ------------------------------------------------------ |
-| `/health` | GET    | —                                                        | `{ ok: true }`                                         |
-| `/stages` | GET    | —                                                        | `ALL_STAGES` from `stages.manifest.ts` (hover data)    |
-| `/index`  | POST   | `{ repo: string, fresh?: boolean }`                      | SSE: `step`× → `done` \| `error`                       |
-| `/ask`    | POST   | `{ repoId, question, maxHops?, k?, limit?, maxTokens? }` | SSE: `route` → (`hop`×, `token`×)× → `done` \| `error` |
+| Route     | Method | Body                                                     | Response                                                               |
+| --------- | ------ | -------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `/health` | GET    | —                                                        | `{ ok: true }`                                                         |
+| `/stages` | GET    | —                                                        | `ALL_STAGES` from `stages.manifest.ts` (hover data)                    |
+| `/repos`  | GET    | —                                                        | `{ repoId, chunksIndexed }[]` — every repo indexed so far, disk-backed |
+| `/index`  | POST   | `{ repo: string, fresh?: boolean }`                      | SSE: `step`× → `done` \| `error`                                       |
+| `/ask`    | POST   | `{ repoId, question, maxHops?, k?, limit?, maxTokens? }` | SSE: `route` → (`hop`×, `token`×)× → `done` \| `error`                 |
 
-`/index` runs Clone → Chunk → Embed → Index and caches the resulting chunks in memory, keyed by
-`repoId` — `/ask` looks them up to hand to Expand's symbol graph. This cache is **not persisted**;
-a server restart loses it even though the actual vector/lexical index on disk survives. That's a
-deliberate tradeoff for a single-process demo server (see the comment above `repoChunks` in
-`server.ts` for the production alternative).
+`/index` runs Clone → Chunk → Embed → Index and caches the resulting chunks in memory
+(`repoChunks`), keyed by `repoId` — `/ask` looks them up to hand to Expand's symbol graph. That
+in-memory cache doesn't survive a server restart, but `/ask` no longer needs it to: on a miss,
+`repo-cache.ts`'s `getOrReconstructChunks` rebuilds the chunk list straight from the on-disk vector
+store (`vector-store.ts`'s `listVectors` + `vectorRowToChunk`) instead of requiring a full
+re-clone/re-chunk/re-embed. `/repos` uses the same disk-backed source of truth (the lexical index
+directory, where every `indexRepo` call unconditionally writes `<repoId>.json`) to list every repo
+ever indexed, independent of what's in memory right now — that's what the UI's repo picker reads.
+
+`/ask` also caches full answers in memory, keyed by `(repoId, question, options)`
+(`ask-stream.ts`'s `askCache`) — repeating the same question against the same repo replays the
+cached route/hops/answer instantly instead of re-running Retrieve through Generate. A re-index
+clears any cached answers for that `repoId` (`invalidateAskCache`), so a repeat question can't
+return a stale answer from before the content changed.
 
 ## SSE, and the two real bugs it took to get right
 

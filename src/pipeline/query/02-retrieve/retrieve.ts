@@ -9,13 +9,13 @@
 
 import { embedBatch } from '../../ingest/03-embed/embedder.ts';
 import {
+  getCachedLexicalIndex,
   indexPath,
-  loadLexicalIndex,
   searchLexical,
   type LexicalHit,
 } from '../../ingest/04-index/lexical-store.ts';
 import {
-  openVectorStore,
+  getSharedVectorStore,
   searchVectors,
   type VectorHit,
 } from '../../ingest/04-index/vector-store.ts';
@@ -60,8 +60,8 @@ export async function retrieveCandidates(
   const embedFn = opts.embedFn ?? embedBatch;
 
   const [db, lexIndex, [queryVector]] = await Promise.all([
-    openVectorStore(opts.dbPath),
-    loadLexicalIndex(indexPath(repoId, opts.lexicalDir)),
+    getSharedVectorStore(opts.dbPath),
+    getCachedLexicalIndex(indexPath(repoId, opts.lexicalDir)),
     embedFn([question]),
   ]);
 

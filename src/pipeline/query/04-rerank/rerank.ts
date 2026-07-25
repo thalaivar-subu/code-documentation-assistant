@@ -4,7 +4,7 @@
  * LLM. →  docs: ./README.md
  */
 
-import { getVectorsByIds, openVectorStore } from '../../ingest/04-index/vector-store.ts';
+import { getSharedVectorStore, getVectorsByIds } from '../../ingest/04-index/vector-store.ts';
 import type { FusedHit } from '../03-fuse/fuse.ts';
 import { scorePairs } from './reranker.ts';
 
@@ -53,7 +53,7 @@ export async function rerankResults(
   const limit = opts.limit ?? DEFAULT_LIMIT;
   const scoreFn = opts.scoreFn ?? scorePairs;
 
-  const db = await openVectorStore(opts.dbPath);
+  const db = await getSharedVectorStore(opts.dbPath);
   const rows = await getVectorsByIds(
     db,
     repoId,

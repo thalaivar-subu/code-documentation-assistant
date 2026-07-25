@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   askQuestion,
+  fetchRepos,
   indexRepo,
   type AskDoneEvent,
   type HopEvent,
+  type IndexedRepo,
   type IndexDoneEvent,
   type RouteEvent,
 } from '../api.ts';
@@ -42,6 +44,27 @@ export function AskTab() {
   const [answer, setAnswer] = useState('');
   const [askResult, setAskResult] = useState<AskDoneEvent | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
+
+  const [indexedRepos, setIndexedRepos] = useState<IndexedRepo[]>([]);
+
+  useEffect(() => {
+    fetchRepos()
+      .then(setIndexedRepos)
+      .catch(() => setIndexedRepos([])); // best-effort — an empty list just hides the picker
+  }, [indexResult]);
+
+  function pickIndexedRepo(r: IndexedRepo) {
+    setIndexError(null);
+    setIndexLog([]);
+    setIndexStage(null);
+    setAskResult(null);
+    setIndexResult({
+      repoId: r.repoId,
+      chunksIndexed: r.chunksIndexed,
+      vectorCount: r.chunksIndexed,
+      lexicalCount: r.chunksIndexed,
+    });
+  }
 
   async function handleIndex() {
     setIndexing(true);
@@ -153,6 +176,22 @@ export function AskTab() {
             {indexing ? 'Indexing…' : 'Index'}
           </button>
         </div>
+        {indexedRepos.length > 0 && (
+          <div className="pill-row">
+            {indexedRepos.map((r) => (
+              <button
+                key={r.repoId}
+                type="button"
+                className={`pill${indexResult?.repoId === r.repoId ? ' pill-active' : ''}`}
+                onClick={() => pickIndexedRepo(r)}
+                disabled={indexing}
+                title="Already indexed — skip re-indexing and ask directly"
+              >
+                {r.repoId} · {r.chunksIndexed}
+              </button>
+            ))}
+          </div>
+        )}
         <PipelineBar stages={ingestStages} />
         {indexLog.length > 0 && <div className="log">{indexLog.join('\n')}</div>}
         {indexResult && (
@@ -204,7 +243,7 @@ export function AskTab() {
                 </>
               ) : (
                 <span className="badge badge-warn">
-                  ⚠ answer cited nothing — treat with more skepticism
+                  ⚠ answer didn't cite a file:line — judge it against the context below yourself
                 </span>
               )}
             </p>
@@ -221,6 +260,24 @@ export function AskTab() {
                   </li>
                 ))}
               </ul>
+            )}
+            {askResult.expanded.length > 0 && (
+              <details style={{ marginTop: 10 }}>
+                <summary className="stage-explain" style={{ cursor: 'pointer', marginBottom: 0 }}>
+                  Context the model actually saw ({askResult.expanded.length} chunks) — whether or
+                  not the answer cited them
+                </summary>
+                <ul className="citation-list" style={{ marginTop: 8 }}>
+                  {askResult.expanded.map((hit) => (
+                    <li key={hit.id}>
+                      <span className="badge">{hit.via}</span>
+                      <span>
+                        {hit.symbolName} — {hit.filePath}:{hit.startLine}-{hit.endLine}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
           </>
         )}

@@ -1,6 +1,6 @@
 /**
  * Talks to the API server (src/api/server.ts). Two endpoints are SSE
- * (streaming pipeline progress); one is plain JSON (stage metadata).
+ * (streaming pipeline progress); the rest are plain JSON.
  */
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
@@ -20,6 +20,18 @@ export interface StageMeta {
 export async function fetchStages(): Promise<StageMeta[]> {
   const res = await fetch(`${API_BASE}/stages`);
   if (!res.ok) throw new Error(`GET /stages failed: ${res.status}`);
+  return res.json();
+}
+
+export interface IndexedRepo {
+  repoId: string;
+  chunksIndexed: number;
+}
+
+/** Disk-backed list of every repo indexed so far — survives a server restart. */
+export async function fetchRepos(): Promise<IndexedRepo[]> {
+  const res = await fetch(`${API_BASE}/repos`);
+  if (!res.ok) throw new Error(`GET /repos failed: ${res.status}`);
   return res.json();
 }
 

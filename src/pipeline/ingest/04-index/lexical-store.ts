@@ -13,7 +13,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import MiniSearch from 'minisearch';
 
@@ -55,6 +55,22 @@ export function indexPath(repoId: string, dir: string = DEFAULT_INDEX_DIR): stri
   return `${dir}/${repoId}.json`;
 }
 
+/**
+ * Every `indexRepo` call unconditionally writes `<dir>/<repoId>.json` (see
+ * `index.ts`), so the filenames in this directory are a complete, disk-backed
+ * list of every repo ever indexed — independent of what's in `repoChunks`'
+ * in-memory cache, which is lost on a server restart.
+ */
+export async function listIndexedRepoIds(dir: string = DEFAULT_INDEX_DIR): Promise<string[]> {
+  try {
+    const entries = await readdir(dir);
+    return entries.filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -'.json'.length));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+}
+
 export async function loadLexicalIndex(path: string): Promise<MiniSearch<LexicalDoc>> {
   try {
     const raw = await readFile(path, 'utf8');
@@ -65,6 +81,32 @@ export async function loadLexicalIndex(path: string): Promise<MiniSearch<Lexical
     }
     throw err;
   }
+}
+
+const lexicalCache = new Map<string, Promise<MiniSearch<LexicalDoc>>>();
+
+/**
+ * Read-path callers (Retrieve) call this instead of `loadLexicalIndex` — every
+ * hop of a query loop was re-reading and re-deserializing the same JSON file
+ * from disk. `indexRepo`'s write path still calls `loadLexicalIndex` directly
+ * (it needs a guaranteed-fresh copy to merge new chunks into and persist), and
+ * calls `invalidateCachedLexicalIndex` once it's written, so the next query
+ * against that repo reloads the updated file instead of serving a stale copy.
+ */
+export function getCachedLexicalIndex(path: string): Promise<MiniSearch<LexicalDoc>> {
+  let cached = lexicalCache.get(path);
+  if (!cached) {
+    cached = loadLexicalIndex(path).catch((err: unknown) => {
+      lexicalCache.delete(path);
+      throw err;
+    });
+    lexicalCache.set(path, cached);
+  }
+  return cached;
+}
+
+export function invalidateCachedLexicalIndex(path: string): void {
+  lexicalCache.delete(path);
 }
 
 export async function saveLexicalIndex(path: string, index: MiniSearch<LexicalDoc>): Promise<void> {

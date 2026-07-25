@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { repoChunks } from './repo-cache.ts';
 import { buildServer } from './server.ts';
 
 function parseSse(body: string): { event: string; data: unknown }[] {
@@ -97,5 +98,24 @@ describe('POST /index → POST /ask — full real pipeline over HTTP', () => {
     const data = askDone!.data as { answer: string; citations: unknown[] };
     expect(typeof data.answer).toBe('string');
     expect(Array.isArray(data.citations)).toBe(true);
+
+    // GET /repos is disk-backed (lexical-store's directory listing), so the
+    // repo just indexed above should show up without needing repoChunks.
+    const reposRes = await app.inject({ method: 'GET', url: '/repos' });
+    expect(reposRes.statusCode).toBe(200);
+    const repos = reposRes.json() as { repoId: string; chunksIndexed: number }[];
+    expect(repos.some((r) => r.repoId === repoId && r.chunksIndexed > 0)).toBe(true);
+
+    // Simulate a server restart losing the in-memory repoChunks cache — /ask
+    // should reconstruct chunks from the vector store instead of 404ing.
+    repoChunks.delete(repoId);
+    const askAfterRestartRes = await app.inject({
+      method: 'POST',
+      url: '/ask',
+      payload: { repoId, question: 'what does chunkRepo do?', maxTokens: 20 },
+    });
+    expect(askAfterRestartRes.statusCode).toBe(200);
+    const reconstructedDone = parseSse(askAfterRestartRes.body).find((e) => e.event === 'done');
+    expect(reconstructedDone).toBeDefined();
   }, 120_000);
 });

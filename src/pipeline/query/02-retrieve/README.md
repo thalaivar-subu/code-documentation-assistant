@@ -9,6 +9,12 @@
 **Deliberately does not merge the two lists.** Reciprocal Rank Fusion is Stage 3 (Fuse, not built
 yet) — this stage's job ends at "here are two independently-ranked candidate lists."
 
+**Store access is cached, not reopened per call.** `getSharedVectorStore`/`getCachedLexicalIndex`
+(`vector-store.ts`/`lexical-store.ts`) memoize the LanceDB connection and the loaded MiniSearch
+index — this stage used to reopen/re-read both on every hop of the grade loop, real wasted I/O for
+a multi-hop question. The lexical cache is busted by `index-stream.ts` right after a successful
+`/index`, so a re-index is never served stale.
+
 ## Where Route's output actually gets used
 
 Dense search always embeds the full question — an embedding model needs sentence context, handing it

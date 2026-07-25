@@ -14,8 +14,10 @@ import cors from '@fastify/cors';
 
 import { runAskStream } from './ask-stream.ts';
 import { runIndexStream } from './index-stream.ts';
-import { repoChunks } from './repo-cache.ts';
+import { getOrReconstructChunks } from './repo-cache.ts';
+import { listIndexedRepoIds } from '../pipeline/ingest/04-index/lexical-store.ts';
 import { ALL_STAGES } from '../pipeline/stages.manifest.ts';
+import { countVectors, getSharedVectorStore } from '../pipeline/ingest/04-index/vector-store.ts';
 import { openSse } from './sse.ts';
 
 export function buildServer() {
@@ -26,6 +28,19 @@ export function buildServer() {
   app.get('/health', async () => ({ ok: true }));
 
   app.get('/stages', async () => ALL_STAGES);
+
+  // Disk-backed, not the in-memory repoChunks cache — survives a server
+  // restart, so the UI can list a repo you indexed in an earlier session.
+  app.get('/repos', async () => {
+    const repoIds = await listIndexedRepoIds();
+    const db = await getSharedVectorStore();
+    return Promise.all(
+      repoIds.map(async (repoId) => ({
+        repoId,
+        chunksIndexed: await countVectors(db, repoId),
+      })),
+    );
+  });
 
   app.post<{ Body: { repo: string; fresh?: boolean } }>(
     '/index',
@@ -75,12 +90,10 @@ export function buildServer() {
     },
     async (request, reply) => {
       const { repoId, question, maxHops, k, limit, maxTokens } = request.body;
-      const chunks = repoChunks.get(repoId);
+      const chunks = await getOrReconstructChunks(repoId);
       if (!chunks) {
         reply.code(404);
-        return {
-          error: `repoId ${repoId} was not indexed by this server process — call /index first`,
-        };
+        return { error: `repoId ${repoId} was never indexed — call /index first` };
       }
 
       const sse = openSse(reply);
