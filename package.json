@@ -1,0 +1,60 @@
+{
+  "name": "code-documentation-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ask any codebase questions in plain English, get answers with file:line citations. AST-aware chunking, hybrid retrieval + reranking, multi-hop agent. Node.js, open-source models, runs locally.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clone": "tsx src/scripts/clone.ts",
+    "chunk": "tsx src/scripts/chunk.ts",
+    "embed": "tsx src/scripts/embed.ts",
+    "index": "tsx src/scripts/index-repo.ts",
+    "route": "tsx src/scripts/route.ts",
+    "retrieve": "tsx src/scripts/retrieve.ts",
+    "fuse": "tsx src/scripts/fuse.ts",
+    "rerank": "tsx src/scripts/rerank.ts",
+    "expand": "tsx src/scripts/expand.ts",
+    "grade": "tsx src/scripts/grade.ts",
+    "generate": "tsx src/scripts/generate.ts",
+    "ask": "tsx src/scripts/ask.ts",
+    "serve": "tsx src/scripts/serve.ts",
+    "web:dev": "vite --config web/vite.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@huggingface/transformers": "^4.2.0",
+    "@lancedb/lancedb": "^0.31.0",
+    "fastify": "^5.10.0",
+    "globby": "^16.2.2",
+    "minisearch": "^7.2.0",
+    "node-llama-cpp": "^3.19.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "simple-git": "3.36.0",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.20.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "22.10.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.6",
+    "tsx": "4.23.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7"
+  }
+}

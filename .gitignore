@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+web/dist/
+*.tsbuildinfo
+
+# local runtime artifacts (traces, cloned repos, downloaded models, indexes)
+.cache/
+data/
+models/
+logs/
+*.log
+
+# env
+.env
+.env.local
+*.local.md
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+Thumbs.db

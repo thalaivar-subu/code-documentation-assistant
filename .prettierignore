@@ -1,0 +1,7 @@
+node_modules
+.cache
+data
+models
+dist
+web/dist
+package-lock.json

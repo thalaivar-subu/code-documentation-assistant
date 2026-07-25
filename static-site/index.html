@@ -1,0 +1,1059 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How RAG actually works — a real, worked example</title>
+    <meta
+      name="description"
+      content="A worked, honestly-captured walkthrough of a Retrieval-Augmented Generation pipeline over real code — every stage, its real output, and where it actually fails."
+    />
+    <script>
+      // Runs before CSS paints, so a stored theme preference applies immediately —
+      // without this, the page flashes the system-preference theme first, then
+      // flips to the stored one a moment later.
+      (function () {
+        try {
+          var stored = localStorage.getItem('rag-theme');
+          if (stored) document.documentElement.setAttribute('data-theme', stored);
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      :root {
+        --paper: #eef1ec;
+        --paper-raised: #f7f9f5;
+        --ink: #1f2419;
+        --ink-dim: #565f4d;
+        --line: #cdd3c4;
+        --accent: #b5791f;
+        --accent-strong: #8f5f14;
+        --highlight: #cbd98a;
+        --highlight-ink: #3a3a1a;
+        --good: #326b52;
+        --bad: #9a3f56;
+        --mono-bg: #e3e7dc;
+        --shadow: 0 1px 0 rgba(31, 36, 25, 0.06);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #14181d;
+          --paper-raised: #1b2027;
+          --ink: #e7e9e1;
+          --ink-dim: #9aa393;
+          --line: #313830;
+          --accent: #e0a63f;
+          --accent-strong: #f0bd5f;
+          --highlight: #4d5a2c;
+          --highlight-ink: #eef1c9;
+          --good: #5fae8c;
+          --bad: #d17e93;
+          --mono-bg: #1e242b;
+        }
+      }
+      :root[data-theme='dark'] {
+        --paper: #14181d;
+        --paper-raised: #1b2027;
+        --ink: #e7e9e1;
+        --ink-dim: #9aa393;
+        --line: #313830;
+        --accent: #e0a63f;
+        --accent-strong: #f0bd5f;
+        --highlight: #4d5a2c;
+        --highlight-ink: #eef1c9;
+        --good: #5fae8c;
+        --bad: #d17e93;
+        --mono-bg: #1e242b;
+      }
+      :root[data-theme='light'] {
+        --paper: #eef1ec;
+        --paper-raised: #f7f9f5;
+        --ink: #1f2419;
+        --ink-dim: #565f4d;
+        --line: #cdd3c4;
+        --accent: #b5791f;
+        --accent-strong: #8f5f14;
+        --highlight: #cbd98a;
+        --highlight-ink: #3a3a1a;
+        --good: #326b52;
+        --bad: #9a3f56;
+        --mono-bg: #e3e7dc;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.55;
+        transition:
+          background 0.2s ease,
+          color 0.2s ease;
+      }
+
+      ::selection {
+        background: var(--highlight);
+        color: var(--highlight-ink);
+      }
+
+      a {
+        color: var(--accent-strong);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
+      }
+      a:hover {
+        color: var(--accent);
+      }
+      a:focus-visible,
+      button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        font-family:
+          'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+        font-weight: 600;
+        text-wrap: balance;
+        color: var(--ink);
+        margin: 0;
+      }
+
+      .mono,
+      code,
+      pre,
+      .stage-output,
+      .stage-cmd {
+        font-family:
+          ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo,
+          monospace;
+      }
+
+      .wrap {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      .wrap-wide {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      /* ── Top bar ─────────────────────────────────────────────────────── */
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 24px;
+        max-width: 980px;
+        margin: 0 auto;
+      }
+
+      .topbar .brand {
+        font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+        font-size: 1rem;
+        letter-spacing: 0.01em;
+      }
+
+      .theme-toggle {
+        background: none;
+        border: 1px solid var(--line);
+        color: var(--ink-dim);
+        border-radius: 999px;
+        padding: 6px 14px;
+        font-size: 0.78rem;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .theme-toggle:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      /* ── Hero: an annotated citation receipt ─────────────────────────── */
+
+      .hero {
+        padding: 28px 0 56px;
+      }
+
+      .eyebrow {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--ink-dim);
+        margin-bottom: 14px;
+      }
+
+      .hero h1 {
+        font-size: clamp(1.9rem, 4.4vw, 2.7rem);
+        line-height: 1.12;
+        max-width: 14ch;
+      }
+
+      .hero .dek {
+        margin-top: 16px;
+        max-width: 62ch;
+        font-size: 1.06rem;
+        color: var(--ink-dim);
+      }
+
+      .receipt {
+        margin-top: 32px;
+        background: var(--paper-raised);
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        box-shadow: var(--shadow);
+        padding: 22px 24px;
+      }
+
+      .receipt-row {
+        display: flex;
+        gap: 10px;
+        font-size: 0.92rem;
+        margin-bottom: 10px;
+      }
+      .receipt-label {
+        flex: none;
+        width: 74px;
+        color: var(--ink-dim);
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding-top: 3px;
+      }
+
+      .mark {
+        background: var(--highlight);
+        color: var(--highlight-ink);
+        padding: 0.05em 0.35em;
+        border-radius: 2px;
+      }
+
+      .stamp {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 14px;
+        border: 1.5px solid var(--good);
+        color: var(--good);
+        font-size: 0.74rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 4px 10px;
+        border-radius: 2px;
+      }
+      .stamp.bad {
+        border-color: var(--bad);
+        color: var(--bad);
+      }
+
+      .stamp-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      /* ── Sections ─────────────────────────────────────────────────────── */
+
+      section {
+        padding: 44px 0;
+      }
+      .rule {
+        border: none;
+        border-top: 1px solid var(--line);
+        margin: 0;
+      }
+
+      .section-head {
+        margin-bottom: 20px;
+      }
+      .section-head .eyebrow {
+        margin-bottom: 8px;
+      }
+      .section-head h2 {
+        font-size: 1.5rem;
+      }
+
+      p {
+        max-width: 66ch;
+      }
+      .lede {
+        font-size: 1.02rem;
+        color: var(--ink-dim);
+        max-width: 66ch;
+      }
+
+      .compare {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1px;
+        background: var(--line);
+        border: 1px solid var(--line);
+        margin-top: 24px;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .compare > div {
+        background: var(--paper);
+        padding: 16px 18px;
+      }
+      .compare .bad-col {
+      }
+      .compare h3 {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-family: inherit;
+        color: var(--ink-dim);
+        margin-bottom: 10px;
+      }
+      .compare ul {
+        margin: 0;
+        padding-left: 1.1em;
+        font-size: 0.92rem;
+      }
+      .compare li {
+        margin-bottom: 8px;
+      }
+      .compare li::marker {
+        color: var(--line);
+      }
+
+      @media (max-width: 620px) {
+        .compare {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ── Pipeline flow ────────────────────────────────────────────────── */
+
+      .pipeline-block {
+        margin-top: 8px;
+      }
+      .pipeline-block + .pipeline-block {
+        margin-top: 40px;
+      }
+
+      .pipeline-label {
+        font-size: 0.8rem;
+        color: var(--ink-dim);
+        margin-bottom: 10px;
+      }
+      .pipeline-label strong {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .flow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0;
+        overflow-x: auto;
+        padding-bottom: 4px;
+      }
+
+      .stage-chip {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--paper-raised);
+        border: 1px solid var(--line);
+        padding: 10px 14px;
+        font-family: inherit;
+        color: var(--ink);
+        cursor: pointer;
+        flex: none;
+        font-size: 0.86rem;
+        text-align: left;
+        transition:
+          border-color 0.12s ease,
+          background 0.12s ease;
+      }
+      .stage-chip:hover {
+        border-color: var(--accent);
+      }
+      .stage-chip.active {
+        border-color: var(--accent-strong);
+        background: var(--highlight);
+        color: var(--highlight-ink);
+      }
+      .stage-chip .num {
+        font-family: ui-monospace, monospace;
+        font-size: 0.76rem;
+        color: var(--ink-dim);
+        flex: none;
+      }
+      .stage-chip.active .num {
+        color: var(--highlight-ink);
+        opacity: 0.7;
+      }
+
+      .flow-arrow {
+        display: flex;
+        align-items: center;
+        padding: 0 6px;
+        color: var(--line);
+        flex: none;
+      }
+
+      .loop-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        font-size: 0.8rem;
+        color: var(--ink-dim);
+      }
+      .loop-note .glyph {
+        color: var(--accent);
+        font-family: ui-monospace, monospace;
+      }
+
+      .detail {
+        margin-top: 16px;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        background: var(--paper-raised);
+        box-shadow: var(--shadow);
+      }
+      .detail-head {
+        padding: 16px 20px 0;
+      }
+      .detail-head .stage-name {
+        font-size: 1.15rem;
+        margin-bottom: 4px;
+      }
+      .detail-head .stage-why {
+        color: var(--ink-dim);
+        font-size: 0.92rem;
+        margin-bottom: 14px;
+      }
+      .detail-cmd {
+        margin: 0 20px;
+        padding: 10px 14px;
+        background: var(--mono-bg);
+        border-radius: 2px;
+        font-size: 0.78rem;
+        color: var(--ink-dim);
+        overflow-x: auto;
+        white-space: pre;
+      }
+      .detail-cmd::before {
+        content: '$ ';
+        color: var(--accent);
+      }
+      .detail-output {
+        margin: 14px 20px 20px;
+        padding: 14px 16px;
+        background: var(--mono-bg);
+        border-radius: 2px;
+        font-size: 0.78rem;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        overflow-x: auto;
+        max-height: 340px;
+        overflow-y: auto;
+      }
+
+      /* ── Swap table ───────────────────────────────────────────────────── */
+
+      .swap-table {
+        margin-top: 24px;
+        border-top: 1px solid var(--line);
+      }
+      .swap-row {
+        display: grid;
+        grid-template-columns: 140px 1fr 1fr;
+        gap: 20px;
+        padding: 16px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .swap-row.head {
+        padding: 0 0 10px;
+        border-bottom: 1px solid var(--line);
+      }
+      .swap-row.head span {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-dim);
+      }
+      .swap-layer {
+        font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+        font-size: 0.98rem;
+        padding-top: 1px;
+      }
+      .swap-default {
+        font-size: 0.88rem;
+      }
+      .swap-default .mono {
+        font-size: 0.84rem;
+      }
+      .swap-alt {
+        font-size: 0.88rem;
+        color: var(--ink-dim);
+      }
+      .swap-alt .mono {
+        color: var(--ink);
+        font-size: 0.84rem;
+      }
+      .swap-alt .pipe {
+        color: var(--line);
+        margin: 0 2px;
+      }
+
+      @media (max-width: 640px) {
+        .swap-row {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+        .swap-row.head {
+          display: none;
+        }
+        .swap-layer {
+          padding-top: 10px;
+        }
+        .swap-layer::after {
+          content: '';
+        }
+      }
+
+      /* ── Footer ───────────────────────────────────────────────────────── */
+
+      footer {
+        padding: 40px 0 56px;
+        color: var(--ink-dim);
+        font-size: 0.86rem;
+      }
+      footer a {
+        color: inherit;
+        text-decoration-line: underline;
+        text-decoration-color: var(--line);
+      }
+      footer a:hover {
+        color: var(--accent);
+        text-decoration-color: var(--accent);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <span class="brand">How RAG works</span>
+      <button class="theme-toggle" id="themeToggle" type="button">Toggle theme</button>
+    </div>
+
+    <main class="wrap">
+      <section class="hero">
+        <p class="eyebrow">Retrieval-Augmented Generation, worked through on real code</p>
+        <h1>An LLM that answers from your codebase — and shows its work</h1>
+        <p class="dek">
+          RAG means: before the model answers, go fetch the actual relevant text, and hand that to
+          the model instead of trusting its memory. Simple in one sentence, easy to get subtly wrong
+          in practice. Below is a real question, asked against a real public Go repository (<a
+            href="https://github.com/thalaivar-subu/telemetry-go"
+            target="_blank"
+            rel="noreferrer"
+            >thalaivar-subu/telemetry-go</a
+          >), with every stage's actual output — including the stage that fails.
+        </p>
+
+        <div class="receipt">
+          <div class="receipt-row">
+            <span class="receipt-label">Question</span>
+            <span>who calls <span class="mono">RecordTaskDuration</span>?</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-label">Found</span>
+            <span class="mono"
+              ><span class="mark">logError</span> — telemetry/metrics.go:92-96</span
+            >
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-label">How</span>
+            <span
+              >traced the real call graph, not guessed from wording — the only stage that can answer
+              &ldquo;who calls X&rdquo;</span
+            >
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-label">Answer</span>
+            <span
+              >&ldquo;The function <span class="mono">RecordTaskDuration</span> is called by the
+              <span class="mono">InstrumentProcessor</span> function.&rdquo;</span
+            >
+          </div>
+          <span class="stamp bad"
+            ><span class="stamp-dot"></span> 0 citations — flagged, not hidden</span
+          >
+        </div>
+      </section>
+
+      <hr class="rule" />
+
+      <section id="why">
+        <div class="section-head">
+          <p class="eyebrow">Why not just ask the model</p>
+          <h2>Naive RAG gets ~85% of the way on prose. Code breaks it.</h2>
+        </div>
+        <p class="lede">
+          Split the text into fixed-size chunks, embed them, grab the top few by similarity, stuff
+          them in a prompt — that's naive RAG, and it's a reasonable start for documents. Source
+          code has different failure modes, and each one needed a real fix, not a bigger model.
+        </p>
+        <div class="compare">
+          <div class="bad-col">
+            <h3>Where naive RAG breaks on code</h3>
+            <ul>
+              <li>Fixed-size splitting cuts a function in half mid-body</li>
+              <li>Nobody phrases a question the way the code names things</li>
+              <li>Embedding similarity never actually reads the question against the candidate</li>
+              <li>
+                &ldquo;How does login work?&rdquo; spans four files — one retrieval pass won't reach
+                all of them
+              </li>
+              <li>A fluent, wrong-sounding-right answer looks identical to a correct one</li>
+            </ul>
+          </div>
+          <div>
+            <h3>What this pipeline does instead</h3>
+            <ul>
+              <li>
+                <strong>AST-aware chunking</strong> — split at function/class boundaries with
+                tree-sitter, never mid-body
+              </li>
+              <li>
+                <strong>Hybrid retrieval</strong> — dense embeddings and BM25 keyword search, run in
+                parallel
+              </li>
+              <li>
+                <strong>Cross-encoder reranking</strong> — a slower model reads query and candidate
+                together
+              </li>
+              <li>
+                <strong>A loop, not a single pass</strong> — retrieve, grade &ldquo;enough?&rdquo;,
+                go again if not
+              </li>
+              <li>
+                <strong>Citation verification</strong> — every claim checked against the exact text
+                the model saw
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <hr class="rule" />
+
+      <section id="pipeline">
+        <div class="section-head">
+          <p class="eyebrow">Click any stage</p>
+          <h2>Two pipelines: index the repo once, then answer questions</h2>
+        </div>
+        <p class="lede">
+          <strong>Ingest</strong> runs once per repo (then incrementally, as files change).
+          <strong>Query</strong> runs once per question — and can loop back on itself when one pass
+          isn't enough. Every output below is real, copy-pasted from an actual run.
+        </p>
+
+        <div class="pipeline-block">
+          <p class="pipeline-label"><strong>Ingest</strong> — offline, once per repo</p>
+          <div class="flow" id="flow-ingest"></div>
+        </div>
+
+        <div class="pipeline-block">
+          <p class="pipeline-label"><strong>Query</strong> — online, once per question</p>
+          <div class="flow" id="flow-query"></div>
+          <p class="loop-note">
+            <span class="glyph">↻</span> Grade can send the loop back to Retrieve — see stage 6 for
+            a real 2-hop example.
+          </p>
+        </div>
+
+        <div class="detail" id="detail"></div>
+      </section>
+
+      <hr class="rule" />
+
+      <section id="swap">
+        <div class="section-head">
+          <p class="eyebrow">None of this is locked in</p>
+          <h2>Every stage above runs in-process by default. Each can be swapped for a service.</h2>
+        </div>
+        <p class="lede">
+          Nothing here requires Docker or a running service — the default is "clone the repo,
+          <span class="mono">npm install</span>, go." But every stage that touches a model or a
+          store sits behind a small interface, so a heavier, managed alternative is a config change,
+          not a rewrite.
+        </p>
+        <div class="swap-table">
+          <div class="swap-row head">
+            <span>Layer</span><span>Default here (zero setup)</span><span>Drop-in alternative</span>
+          </div>
+
+          <div class="swap-row">
+            <div class="swap-layer">Embeddings</div>
+            <div class="swap-default">
+              Transformers.js <span class="mono">(bge-small, ONNX, in-process)</span>
+            </div>
+            <div class="swap-alt">
+              <span class="mono">Ollama</span> embeddings<span class="pipe">·</span>Hugging Face
+              TEI<span class="pipe">·</span>OpenAI / Cohere / Voyage APIs
+            </div>
+          </div>
+
+          <div class="swap-row">
+            <div class="swap-layer">Vector store</div>
+            <div class="swap-default">
+              LanceDB <span class="mono">(files on disk, no server)</span>
+            </div>
+            <div class="swap-alt">
+              <span class="mono">Qdrant</span> (self-hosted or cloud)<span class="pipe">·</span
+              >pgvector<span class="pipe">·</span>Pinecone
+            </div>
+          </div>
+
+          <div class="swap-row">
+            <div class="swap-layer">Keyword search</div>
+            <div class="swap-default">MiniSearch <span class="mono">(in-process BM25)</span></div>
+            <div class="swap-alt">
+              Qdrant sparse vectors<span class="pipe">·</span>OpenSearch / Elasticsearch
+            </div>
+          </div>
+
+          <div class="swap-row">
+            <div class="swap-layer">Reranker</div>
+            <div class="swap-default">
+              bge-reranker <span class="mono">(ONNX, in-process)</span>
+            </div>
+            <div class="swap-alt">
+              Hugging Face TEI rerank<span class="pipe">·</span>Cohere / Jina rerank APIs
+            </div>
+          </div>
+
+          <div class="swap-row">
+            <div class="swap-layer">LLM</div>
+            <div class="swap-default">
+              <span class="mono">node-llama-cpp</span>
+              <span class="mono">(local GGUF, runs on this machine's GPU)</span>
+            </div>
+            <div class="swap-alt">
+              any OpenAI-compatible endpoint — <span class="mono">Ollama</span>, Groq, vLLM,
+              Together, OpenRouter — one env var swap
+            </div>
+          </div>
+
+          <div class="swap-row">
+            <div class="swap-layer">Tracing / eval</div>
+            <div class="swap-default">Custom recall@k / MRR / nDCG + JSONL trace files</div>
+            <div class="swap-alt">
+              <span class="mono">Langfuse</span> (hosted tracing + evaluation)
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <hr class="rule" />
+
+      <footer>
+        <p>
+          A short field guide to Retrieval-Augmented Generation, worked through on real, cited
+          output.
+        </p>
+      </footer>
+    </main>
+
+    <script>
+      (function () {
+        var STAGES = [
+          {
+            id: 'clone',
+            pipeline: 'ingest',
+            order: 1,
+            title: 'Clone',
+            why: 'Get the actual source, not a description of it — a partial clone (blobs on demand) captures the repo and its commit.',
+            cmd: 'npm run clone -- https://github.com/thalaivar-subu/telemetry-go',
+            out:
+              '── Ingest · Stage 1: Clone ─────────────────────────────────────\n' +
+              '  → source: remote → https://github.com/thalaivar-subu/telemetry-go\n' +
+              '  → repoId: thalaivar-subu-telemetry-go-7c354319\n' +
+              '  → partial-cloning into .cache/repos/thalaivar-subu-telemetry-go-7c354319 …\n' +
+              '  → cloned — HEAD a5d74d13 on main — 25 tracked files\n\n' +
+              '  Result\n  ------\n' +
+              '  repoId        thalaivar-subu-telemetry-go-7c354319\n' +
+              '  source        remote\n  commit        a5d74d13629c\n  branch        main\n' +
+              '  trackedFiles  25\n  reused        false',
+          },
+
+          {
+            id: 'chunk',
+            pipeline: 'ingest',
+            order: 2,
+            title: 'AST Chunking',
+            why: 'Parse into a syntax tree and cut at function/class boundaries — a fixed-size splitter would slice a function in half.',
+            cmd: 'npm run chunk -- <repo> --file "common.go" --symbol Instrument --json',
+            out:
+              '{\n  "id": "247397eb33fc50636c7895c7da03fb56",\n  "repoId": "thalaivar-subu-telemetry-go-7c354319",\n' +
+              '  "filePath": "telemetry/common.go",\n  "kind": "code",\n  "language": "go",\n' +
+              '  "symbolName": "InstrumentProcessor",\n  "symbolType": "function",\n' +
+              '  "startLine": 12,\n  "endLine": 44,\n' +
+              '  "content": "func InstrumentProcessor(ctx context.Context, ...) context.Context {\\n  defer Recover(...)\\n  if ENABLED {\\n    ...\\n    IncTaskCounter(ctx, 1, attributes...)\\n    RecordTaskDuration(ctx, startTime, attributes...)\\n    ...\\n  }\\n  return ctx\\n}",\n' +
+              '  "contentHash": "04a808f53eb7667db87894becf21b64695a99ec7dabebc676e27e808e09a0288"\n}\n\n' +
+              '82 chunks total from 25 tracked files (code + config, tree-sitter AST across Go/TS/JS/Python/Java).',
+          },
+
+          {
+            id: 'embed',
+            pipeline: 'ingest',
+            order: 3,
+            title: 'Embed',
+            why: 'Turn each chunk into a vector — so code that means the same thing can be found even when it’s worded completely differently.',
+            cmd: 'npm run embed -- <repo> --sample 0',
+            out:
+              'model: Xenova/bge-small-en-v1.5\n\n  total 82  |  embedded 82  |  cached 0  |  dims 384  |  7776 ms\n\n' +
+              '  52fcefe8cbf8ec58ff95d5c3516d2f8e  hash=4183b036ac92…  vector[0..3]=-0.0742,-0.0373,0.0232,-0.0539\n\n' +
+              'Re-running the same command a second time: embedded 0, cached 82 — the content-hash\ncache means unchanged chunks are never re-embedded.',
+          },
+
+          {
+            id: 'index',
+            pipeline: 'ingest',
+            order: 4,
+            title: 'Index',
+            why: 'Store the vectors and a keyword index side by side, with deterministic ids — so re-indexing never duplicates a chunk.',
+            cmd: 'npm run index -- <repo> --dump 1',
+            out:
+              'repoId thalaivar-subu-telemetry-go-7c354319  |  chunksIndexed 82  |  vectorCount 82  |  lexicalCount 82  |  99 ms\n\n' +
+              '  ── raw vector-store row ──\n{\n  "id": "52fcefe8cbf8ec58ff95d5c3516d2f8e",\n  "filePath": "go.mod",\n' +
+              '  "kind": "config",  "configFormat": "gomod",\n  "startLine": 1,  "endLine": 68,\n' +
+              '  "vector": [-0.0742, -0.0373, 0.0232, "... 384 numbers total"]\n}\n\n' +
+              'Re-running the same command again: counts stay at 82 — the upsert is idempotent, not additive.',
+          },
+
+          {
+            id: 'route',
+            pipeline: 'query',
+            order: 1,
+            title: 'Route',
+            why: 'Classify the question before searching — a symbol name needs different handling than a vague concept. Rule-based, no LLM call.',
+            cmd: 'npm run route -- "who calls RecordTaskDuration?"',
+            out:
+              'question   "who calls RecordTaskDuration?"\n  intent     trace\n  symbols    [RecordTaskDuration]\n  files      []\n' +
+              '  reason     matched trace phrase "who calls" — needs call/dependency graph expansion',
+          },
+
+          {
+            id: 'retrieve',
+            pipeline: 'query',
+            order: 2,
+            title: 'Retrieve',
+            why: 'Search two ways in parallel: meaning (vectors) and exact keywords (BM25) — each one catches real matches the other misses.',
+            cmd: 'npm run retrieve -- <repo> "who calls RecordTaskDuration?" --k 5',
+            out:
+              'intent     trace  (symbols=[RecordTaskDuration] files=[])\n\n  vector candidates (nearest first)\n' +
+              '    0.5165  RecordTaskDuration       telemetry/metrics.go:81-90\n' +
+              '    0.9198  IncTaskCounter           telemetry/metrics.go:70-79\n' +
+              '    1.0024  InstrumentProcessor      telemetry/common.go:12-44\n\n' +
+              '  lexical candidates (highest score first)\n    13.8483  RecordTaskDuration       telemetry/metrics.go:81-90\n' +
+              '    7.3326  InitializeOTEL           telemetry/otel.go:62-112\n\n' +
+              'Route’s extracted symbol "RecordTaskDuration" drove a second, precise lexical query — without\nit, lexical search on the full question alone ranked a different, weaker match first.',
+          },
+
+          {
+            id: 'fuse',
+            pipeline: 'query',
+            order: 3,
+            title: 'Fuse',
+            why: 'Merge the two ranked lists by rank position (Reciprocal Rank Fusion) — vector distance and BM25 score aren’t on comparable scales.',
+            cmd: 'npm run fuse -- <repo> "who calls RecordTaskDuration?" --k 5',
+            out:
+              'fused ranking (top 5)\n    0.03279  [vector+lexical]  RecordTaskDuration       telemetry/metrics.go:81-90\n' +
+              '    0.01613  [vector      ]  IncTaskCounter           telemetry/metrics.go:70-79\n' +
+              '    0.01613  [lexical     ]  InitializeOTEL           telemetry/otel.go:62-112\n' +
+              '    0.01587  [vector      ]  InstrumentProcessor      telemetry/common.go:12-44\n' +
+              '    0.01563  [vector      ]  InitLogger               telemetry/utils.go:16-26\n\n' +
+              'RecordTaskDuration ranks #1 in BOTH lists, so its fused score (2/61 ≈ 0.03279) is roughly\ndouble any single-list-only hit — Reciprocal Rank Fusion, k=60.',
+          },
+
+          {
+            id: 'rerank',
+            pipeline: 'query',
+            order: 4,
+            title: 'Rerank',
+            why: 'A slower model reads the question and each candidate together and reorders them — retrieval rank alone can’t do that.',
+            cmd: 'npm run rerank -- <repo> "who calls RecordTaskDuration?" --k 10 --limit 6',
+            out:
+              'fused candidates: 11\n  reranked in 6480 ms → top 6\n\n  rerankScore  rrfScore   symbol                    location\n' +
+              '  0.0273       0.0328     RecordTaskDuration        telemetry/metrics.go:81-90\n' +
+              '  0.0124       0.0159     InstrumentProcessor       telemetry/common.go:12-44\n' +
+              '  0.0003       0.0154     RegisterMetrics           telemetry/metrics.go:29-68\n' +
+              '  0.0001       0.0161     InitializeOTEL            telemetry/otel.go:62-112\n\n' +
+              'InstrumentProcessor had a LOWER rrfScore than InitializeOTEL but ranks far above it after\nreranking — the cross-encoder read the actual chunk content, not just retrieval rank.',
+          },
+
+          {
+            id: 'expand',
+            pipeline: 'query',
+            order: 5,
+            title: 'Expand',
+            why: 'Follow the real call graph to pull in actual callers/callees — the only stage built to answer "who calls X" rather than "what is X".',
+            cmd: 'npm run expand -- <repo> "who calls RecordTaskDuration?" --k 20 --limit 8',
+            out:
+              'reranked   8 hits\n  expand     +10 chunk(s) via the symbol graph\n\n' +
+              '  [rerank ] RecordTaskDuration       telemetry/metrics.go:81-90\n' +
+              '  [rerank ] InstrumentProcessor      telemetry/common.go:12-44\n' +
+              '  [caller ] logError                 telemetry/metrics.go:92-96\n' +
+              '  [caller ] InitializeTelemetry      telemetry/otel.go:19-35\n' +
+              '  [callee ] Recover                  telemetry/utils.go:68-81\n\n' +
+              '"logError" (right after RecordTaskDuration in the same file) surfaces as [caller] — the\nfirst thing in this whole pipeline that actually answers "who calls X", not just "what is X".',
+          },
+
+          {
+            id: 'grade',
+            pipeline: 'query',
+            order: 6,
+            title: 'Grade',
+            why: '"Enough to answer yet?" If not, loop back to Retrieve carrying what this hop just learned — a real cycle, not a single pass.',
+            cmd: 'npm run grade -- <repo> "who triggers newPropagator internally?" --max-hops 3 --k 2 --limit 1',
+            out:
+              'question   "who triggers newPropagator internally?"\n  intent     symbol\n\n' +
+              '  hop 0  query="who triggers newPropagator internally?"\n' +
+              '         insufficient — looping — best rerank score (0.0055) is below the confidence threshold (0.01)\n' +
+              '  hop 1  query="who triggers newPropagator internally? initSdk newResource newPropagator"\n' +
+              '         sufficient — confident top match\n\n' +
+              'Hop 0’s low-confidence match still ran Expand, which found related symbols — those get folded\ninto hop 1’s query. You don’t know hop 2 until hop 1 returns — the whole reason this is a loop\nand not a fixed chain.',
+          },
+
+          {
+            id: 'generate',
+            pipeline: 'query',
+            order: 7,
+            title: 'Generate',
+            why: 'Stream an answer from a local LLM, instructed to cite (file:line) for every claim it makes.',
+            cmd: 'npm run generate -- <repo> "who calls RecordTaskDuration?" --max-tokens 200',
+            out:
+              'question   "who calls RecordTaskDuration?"\n  hops       1  (18 chunks in final context)\n\n  ── answer ──\n' +
+              '  The function `RecordTaskDuration` is called by the `InstrumentProcessor` function.\n\n' +
+              '  generated in 21946 ms\n  citations resolved from text: 0\n\n' +
+              'Factually correct (confirmed against the real InstrumentProcessor source above) — but this\n1.5B local model didn’t wrap it in the required (file:line) citation syntax. A real, measured\nlimitation, not hidden — see Verify below.',
+          },
+
+          {
+            id: 'verify',
+            pipeline: 'query',
+            order: 8,
+            title: 'Verify',
+            why: 'Check every citation against the exact context the model actually saw, not the whole repo — a hallucinated citation can’t sneak through.',
+            cmd: 'npm run ask -- <repo> "who calls RecordTaskDuration?" --max-tokens 200',
+            out:
+              'intent      trace\n  hops        1\n  citations   0 found, 0 resolved\n' +
+              '  ⚠ the answer cited nothing — nothing to verify, treat with more skepticism\n\n' +
+              'Without this stage, there’s no principled way to tell a correct-but-uncited answer apart\nfrom a confident-sounding hallucination. hasCitations:false is a real, actionable signal —\nnot a footnote, the reason this stage exists at all.',
+          },
+        ];
+
+        var REPO = 'https://github.com/thalaivar-subu/telemetry-go';
+
+        function stagesFor(pipeline) {
+          return STAGES.filter(function (s) {
+            return s.pipeline === pipeline;
+          });
+        }
+
+        function render(pipeline, containerId) {
+          var el = document.getElementById(containerId);
+          var list = stagesFor(pipeline);
+          el.innerHTML = '';
+          list.forEach(function (s, i) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'stage-chip';
+            btn.dataset.id = s.id;
+            btn.innerHTML = '<span class="num">' + s.order + '</span><span>' + s.title + '</span>';
+            btn.addEventListener('click', function () {
+              selectStage(s.id);
+            });
+            el.appendChild(btn);
+            if (i < list.length - 1) {
+              var arrow = document.createElement('span');
+              arrow.className = 'flow-arrow';
+              arrow.setAttribute('aria-hidden', 'true');
+              arrow.textContent = '→';
+              el.appendChild(arrow);
+            }
+          });
+        }
+
+        function selectStage(id) {
+          var stage = STAGES.filter(function (s) {
+            return s.id === id;
+          })[0];
+          document.querySelectorAll('.stage-chip').forEach(function (chip) {
+            chip.classList.toggle('active', chip.dataset.id === id);
+          });
+          var detail = document.getElementById('detail');
+          detail.innerHTML =
+            '<div class="detail-head">' +
+            '<div class="stage-name">' +
+            stage.title +
+            ' <span style="color:var(--ink-dim);font-weight:400;font-size:0.7rem;text-transform:uppercase;letter-spacing:.06em;">· ' +
+            stage.pipeline +
+            '</span></div>' +
+            '<div class="stage-why">' +
+            stage.why +
+            '</div>' +
+            '</div>' +
+            '<pre class="detail-cmd"></pre>' +
+            '<pre class="detail-output"></pre>';
+          detail.querySelector('.detail-cmd').textContent = stage.cmd.replace('<repo>', REPO);
+          detail.querySelector('.detail-output').textContent = stage.out;
+          detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        render('ingest', 'flow-ingest');
+        render('query', 'flow-query');
+        selectStage('clone');
+
+        // ── Theme toggle ── (initial restore already happened in <head>, before paint)
+        var root = document.documentElement;
+        var toggle = document.getElementById('themeToggle');
+        toggle.addEventListener('click', function () {
+          var current = root.getAttribute('data-theme');
+          var next =
+            current === 'dark'
+              ? 'light'
+              : current === 'light'
+                ? 'dark'
+                : window.matchMedia('(prefers-color-scheme: dark)').matches
+                  ? 'light'
+                  : 'dark';
+          root.setAttribute('data-theme', next);
+          try {
+            localStorage.setItem('rag-theme', next);
+          } catch (e) {}
+        });
+      })();
+    </script>
+  </body>
+</html>

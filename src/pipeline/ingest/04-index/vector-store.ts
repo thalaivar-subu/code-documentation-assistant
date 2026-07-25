@@ -1,0 +1,195 @@
+/**
+ * Dense (vector) index — Stage 4's LanceDB adapter.  →  docs: ./README.md
+ *
+ * One embedded LanceDB database on disk, one shared `chunks` table across all
+ * indexed repos (filtered by `repoId` at query time), so indexing a second repo
+ * never means re-creating a store.
+ *
+ * ── MANAGED SWAP ─────────────────────────────────────────────────────────────
+ * Default: LanceDB, embedded (files on disk, this file). To use a managed vector
+ * service instead (e.g. Qdrant), add an adapter with the same
+ * upsert/search/count shape and wire it in `index.ts`. No code change elsewhere.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+import * as lancedb from '@lancedb/lancedb';
+
+import type { Chunk } from '../../../core/types.ts';
+import type { EmbeddedChunk } from '../03-embed/embed.ts';
+
+export const DEFAULT_DB_PATH = '.cache/index/lancedb';
+const TABLE = 'chunks';
+
+/**
+ * What actually lands in LanceDB. Optional Chunk fields become `''`, NOT `null` —
+ * LanceDB's schema inference reads row 0 to decide each column's Arrow type, and
+ * a `null` first value gives it nothing to infer from ("Failed to infer data
+ * type for field X at row 0"). An empty string is still unambiguously Utf8.
+ */
+export interface VectorRow {
+  id: string;
+  repoId: string;
+  filePath: string;
+  kind: string;
+  language: string;
+  configFormat: string;
+  symbolName: string;
+  symbolType: string;
+  parentSymbol: string;
+  startLine: number;
+  endLine: number;
+  content: string;
+  contentHash: string;
+  commitSha: string;
+  vector: number[];
+}
+
+export function toVectorRow(chunk: Chunk, embedding: EmbeddedChunk): VectorRow {
+  return {
+    id: chunk.id,
+    repoId: chunk.repoId,
+    filePath: chunk.filePath,
+    kind: chunk.kind,
+    language: chunk.language ?? '',
+    configFormat: chunk.configFormat ?? '',
+    symbolName: chunk.symbolName,
+    symbolType: chunk.symbolType,
+    parentSymbol: chunk.parentSymbol ?? '',
+    startLine: chunk.startLine,
+    endLine: chunk.endLine,
+    content: chunk.content,
+    contentHash: chunk.contentHash,
+    commitSha: chunk.commitSha ?? '',
+    vector: embedding.vector,
+  };
+}
+
+export function openVectorStore(dbPath: string = DEFAULT_DB_PATH): Promise<lancedb.Connection> {
+  return lancedb.connect(dbPath);
+}
+
+/**
+ * Idempotent upsert keyed by `id` (Stage 2's deterministic content-hash id): a
+ * chunk whose content hasn't changed re-upserts to the same row, so re-indexing
+ * never duplicates. First call creates the table; later calls merge into it.
+ */
+export async function upsertVectors(db: lancedb.Connection, rows: VectorRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE)) {
+    await db.createTable(TABLE, rows);
+    return;
+  }
+  const tbl = await db.openTable(TABLE);
+  await tbl.mergeInsert('id').whenMatchedUpdateAll().whenNotMatchedInsertAll().execute(rows);
+}
+
+export async function countVectors(db: lancedb.Connection, repoId?: string): Promise<number> {
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE)) return 0;
+  const tbl = await db.openTable(TABLE);
+  if (!repoId) return tbl.countRows();
+  return tbl.countRows(repoIdFilter(repoId));
+}
+
+export interface VectorHit {
+  id: string;
+  filePath: string;
+  symbolName: string;
+  startLine: number;
+  endLine: number;
+  content: string;
+  /** '' means no commit was recorded at index time (see Chunk.commitSha). */
+  commitSha: string;
+  /** L2 distance on unit-normalized vectors — lower is more similar (0 = identical). */
+  distance: number;
+}
+
+export async function searchVectors(
+  db: lancedb.Connection,
+  queryVector: number[],
+  opts: { k?: number; repoId?: string } = {},
+): Promise<VectorHit[]> {
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE)) return [];
+  const tbl = await db.openTable(TABLE);
+  let query = tbl.search(queryVector).limit(opts.k ?? 10);
+  if (opts.repoId) query = query.where(repoIdFilter(opts.repoId));
+  const rows = await query.toArray();
+  return rows.map((r) => ({
+    id: r.id,
+    filePath: r.filePath,
+    symbolName: r.symbolName,
+    startLine: r.startLine,
+    endLine: r.endLine,
+    content: r.content,
+    commitSha: r.commitSha,
+    distance: r._distance,
+  }));
+}
+
+/**
+ * Raw stored rows — a plain table scan (no vector search, no ranking), for
+ * actually inspecting what landed in the store rather than trusting a count.
+ * `vector` comes back from LanceDB as an Arrow `Vector` wrapper, not a plain
+ * array, so it's converted here for anything downstream (e.g. JSON.stringify).
+ */
+export async function listVectors(
+  db: lancedb.Connection,
+  opts: { repoId?: string; limit?: number } = {},
+): Promise<VectorRow[]> {
+  // Short-circuit rather than passing limit: 0 to LanceDB — combined with a
+  // `.where()` filter, `.limit(0)` is silently ignored by the SDK (verified:
+  // it returns every matching row, not zero), so relying on it here would
+  // have swapped one falsy-zero-shaped bug for another, harder-to-spot one.
+  if (opts.limit === 0) return [];
+
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE)) return [];
+  const tbl = await db.openTable(TABLE);
+  let query = tbl.query();
+  if (opts.repoId) query = query.where(repoIdFilter(opts.repoId));
+  if (opts.limit !== undefined) query = query.limit(opts.limit);
+  const rows = await query.toArray();
+  return rows.map((r) => ({ ...r, vector: Array.from(r.vector as Iterable<number>) }) as VectorRow);
+}
+
+/**
+ * Raw stored rows for a SPECIFIC set of ids — the primitive Rerank needs to
+ * hydrate a small shortlist's content, as opposed to `listVectors`'s full
+ * table scan (which is for debug/inspection, not per-query production use).
+ * Returns fewer rows than `ids.length` if some ids are no longer indexed.
+ */
+export async function getVectorsByIds(
+  db: lancedb.Connection,
+  repoId: string,
+  ids: string[],
+): Promise<VectorRow[]> {
+  if (ids.length === 0) return [];
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE)) return [];
+  const tbl = await db.openTable(TABLE);
+  const rows = await tbl
+    .query()
+    .where(`${repoIdFilter(repoId)} AND id IN (${ids.map(idFilterValue).join(', ')})`)
+    .toArray();
+  return rows.map((r) => ({ ...r, vector: Array.from(r.vector as Iterable<number>) }) as VectorRow);
+}
+
+/** repoId is always our own generated slug ([a-z0-9-]+ — see clone.ts's toRepoId), but validate anyway before it goes into a filter string. */
+function repoIdFilter(repoId: string): string {
+  if (!/^[a-z0-9-]+$/i.test(repoId)) throw new Error(`invalid repoId for filter: ${repoId}`);
+  return `repoId = '${repoId}'`;
+}
+
+/**
+ * Chunk ids are normally our own 32-char lowercase hex hash (see chunk-file.ts's
+ * chunkId), but tests across this codebase also use short human-readable ids
+ * (e.g. 'ghost', 'rrf-winner') — so this validates the same safe charset as
+ * `repoIdFilter` (alphanumeric + hyphen) rather than hex-only, while still
+ * rejecting anything that could break out of the quoted SQL literal.
+ */
+function idFilterValue(id: string): string {
+  if (!/^[a-z0-9-]+$/i.test(id)) throw new Error(`invalid id for filter: ${id}`);
+  return `'${id}'`;
+}
