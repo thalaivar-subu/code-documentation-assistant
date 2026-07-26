@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   askQuestion,
   fetchRepos,
@@ -29,15 +29,27 @@ const QUERY_STAGES = [
   { id: 'verify', title: 'Verify' },
 ];
 
+const HISTORY_LIMIT = 5;
+
+interface HistoryEntry {
+  id: string;
+  repoId: string;
+  question: string;
+  answer: string;
+  route: RouteEvent | null;
+  hops: HopEvent[];
+  askResult: AskDoneEvent;
+}
+
 export function AskTab() {
-  const [repo, setRepo] = useState('https://github.com/thalaivar-subu/telemetry-go');
+  const [repo, setRepo] = useState('');
   const [indexing, setIndexing] = useState(false);
   const [indexLog, setIndexLog] = useState<string[]>([]);
   const [indexResult, setIndexResult] = useState<IndexDoneEvent | null>(null);
   const [indexStage, setIndexStage] = useState<string | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
 
-  const [question, setQuestion] = useState('who calls RecordTaskDuration?');
+  const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [route, setRoute] = useState<RouteEvent | null>(null);
   const [hops, setHops] = useState<HopEvent[]>([]);
@@ -46,6 +58,15 @@ export function AskTab() {
   const [askError, setAskError] = useState<string | null>(null);
 
   const [indexedRepos, setIndexedRepos] = useState<IndexedRepo[]>([]);
+
+  // route/hops accumulate via SSE events during a single ask; the onDone
+  // closure below was created once, at call time, so it can't see later
+  // setRoute/setHops updates — these refs mirror the same values so onDone
+  // can read the final, accumulated state instead of a stale snapshot.
+  const routeRef = useRef<RouteEvent | null>(null);
+  const hopsRef = useRef<HopEvent[]>([]);
+  const nextHistoryId = useRef(0);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   useEffect(() => {
     fetchRepos()
@@ -109,7 +130,10 @@ export function AskTab() {
 
   async function handleAsk() {
     if (!indexResult) return;
+    const repoId = indexResult.repoId;
     setAsking(true);
+    routeRef.current = null;
+    hopsRef.current = [];
     setRoute(null);
     setHops([]);
     setAnswer('');
@@ -117,12 +141,34 @@ export function AskTab() {
     setAskError(null);
     try {
       await askQuestion(
-        { repoId: indexResult.repoId, question, maxTokens: 250 },
+        { repoId, question, maxTokens: 250 },
         {
-          onRoute: (e) => setRoute(e),
-          onHop: (e) => setHops((h) => [...h, e]),
+          onRoute: (e) => {
+            routeRef.current = e;
+            setRoute(e);
+          },
+          onHop: (e) => {
+            hopsRef.current = [...hopsRef.current, e];
+            setHops((h) => [...h, e]);
+          },
           onToken: (t) => setAnswer((a) => a + t),
-          onDone: (e) => setAskResult(e),
+          onDone: (e) => {
+            setAskResult(e);
+            setHistory((h) =>
+              [
+                {
+                  id: String(nextHistoryId.current++),
+                  repoId,
+                  question,
+                  answer: e.answer,
+                  route: routeRef.current,
+                  hops: hopsRef.current,
+                  askResult: e,
+                },
+                ...h,
+              ].slice(0, HISTORY_LIMIT),
+            );
+          },
           onError: (message) => setAskError(message),
         },
       );
@@ -131,6 +177,15 @@ export function AskTab() {
     } finally {
       setAsking(false);
     }
+  }
+
+  function revisitHistory(entry: HistoryEntry) {
+    setQuestion(entry.question);
+    setRoute(entry.route);
+    setHops(entry.hops);
+    setAnswer(entry.answer);
+    setAskResult(entry.askResult);
+    setAskError(null);
   }
 
   const ingestStages: PipelineStageView[] = INGEST_STAGES.map((s) => {
@@ -183,24 +238,23 @@ export function AskTab() {
     <div>
       <section className="panel">
         <h2>1. Index a repo</h2>
-        <p className="stage-explain">
-          AST-aware chunking for <span className="badge">TypeScript</span>{' '}
-          <span className="badge">JavaScript</span> <span className="badge">Python</span>{' '}
-          <span className="badge">Java</span> <span className="badge">Go</span> — plus structural
-          chunking for config/build files (JSON, YAML, TOML, Dockerfile, Terraform, …). Anything
-          else in the repo is skipped, not garbled.
-        </p>
-        <div className="row">
+        <form
+          className="row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!indexing && repo) handleIndex();
+          }}
+        >
           <input
             type="text"
             value={repo}
             onChange={(e) => handleRepoInputChange(e.target.value)}
-            placeholder="https://github.com/owner/repo or a local path"
+            placeholder="e.g. https://github.com/thalaivar-subu/telemetry-go, or a local path"
           />
-          <button className="primary" onClick={handleIndex} disabled={indexing || !repo}>
+          <button type="submit" className="primary" disabled={indexing || !repo}>
             {indexing ? 'Indexing…' : 'Index'}
           </button>
-        </div>
+        </form>
         {indexedRepos.length > 0 && (
           <div className="pill-row">
             {indexedRepos.map((r) => (
@@ -230,21 +284,23 @@ export function AskTab() {
 
       <section className="panel">
         <h2>2. Ask a question</h2>
-        <div className="row">
+        <form
+          className="row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!asking && indexResult && question) handleAsk();
+          }}
+        >
           <input
             type="text"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="who calls RecordTaskDuration?"
           />
-          <button
-            className="primary"
-            onClick={handleAsk}
-            disabled={asking || !indexResult || !question}
-          >
+          <button type="submit" className="primary" disabled={asking || !indexResult || !question}>
             {asking ? 'Asking…' : 'Ask'}
           </button>
-        </div>
+        </form>
         {indexResult ? (
           <p className="stage-explain">
             Asking against <span className="badge">{indexResult.repoId}</span>
@@ -332,6 +388,25 @@ export function AskTab() {
         )}
         {askError && <p className="stage-explain mark-bad">✗ {askError}</p>}
       </section>
+
+      {history.length > 0 && (
+        <section className="panel">
+          <h2>Recent questions</h2>
+          <p className="stage-explain">
+            Last {history.length} of {HISTORY_LIMIT} — click one to revisit its answer and trace.
+          </p>
+          <ul className="history-list">
+            {history.map((h) => (
+              <li key={h.id}>
+                <button type="button" className="history-item" onClick={() => revisitHistory(h)}>
+                  <span className="history-q">{h.question}</span>
+                  <span className="badge">{h.repoId}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

@@ -8,77 +8,33 @@
       name="description"
       content="A worked, honestly-captured walkthrough of a Retrieval-Augmented Generation pipeline over real code — every stage, its real output, and where it actually fails."
     />
-    <script>
-      // Runs before CSS paints, so a stored theme preference applies immediately —
-      // without this, the page flashes the system-preference theme first, then
-      // flips to the stored one a moment later.
-      (function () {
-        try {
-          var stored = localStorage.getItem('rag-theme');
-          if (stored) document.documentElement.setAttribute('data-theme', stored);
-        } catch (e) {}
-      })();
-    </script>
     <style>
       :root {
-        --paper: #eef1ec;
-        --paper-raised: #f7f9f5;
-        --ink: #1f2419;
-        --ink-dim: #565f4d;
-        --line: #cdd3c4;
-        --accent: #b5791f;
-        --accent-strong: #8f5f14;
-        --highlight: #cbd98a;
-        --highlight-ink: #3a3a1a;
-        --good: #326b52;
-        --bad: #9a3f56;
-        --mono-bg: #e3e7dc;
-        --shadow: 0 1px 0 rgba(31, 36, 25, 0.06);
-      }
-
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --paper: #14181d;
-          --paper-raised: #1b2027;
-          --ink: #e7e9e1;
-          --ink-dim: #9aa393;
-          --line: #313830;
-          --accent: #e0a63f;
-          --accent-strong: #f0bd5f;
-          --highlight: #4d5a2c;
-          --highlight-ink: #eef1c9;
-          --good: #5fae8c;
-          --bad: #d17e93;
-          --mono-bg: #1e242b;
-        }
-      }
-      :root[data-theme='dark'] {
-        --paper: #14181d;
-        --paper-raised: #1b2027;
-        --ink: #e7e9e1;
-        --ink-dim: #9aa393;
-        --line: #313830;
-        --accent: #e0a63f;
-        --accent-strong: #f0bd5f;
-        --highlight: #4d5a2c;
-        --highlight-ink: #eef1c9;
-        --good: #5fae8c;
-        --bad: #d17e93;
-        --mono-bg: #1e242b;
-      }
-      :root[data-theme='light'] {
-        --paper: #eef1ec;
-        --paper-raised: #f7f9f5;
-        --ink: #1f2419;
-        --ink-dim: #565f4d;
-        --line: #cdd3c4;
-        --accent: #b5791f;
-        --accent-strong: #8f5f14;
-        --highlight: #cbd98a;
-        --highlight-ink: #3a3a1a;
-        --good: #326b52;
-        --bad: #9a3f56;
-        --mono-bg: #e3e7dc;
+        color-scheme: light;
+        --paper: #ffffff;
+        --paper-raised: #faf9fc;
+        --paper-raised-2: #f0edf7;
+        --ink: #150c28;
+        --ink-dim: #4a3d66;
+        --ink-muted: #6b6480;
+        --line: #e2dcf0;
+        --line-strong: #cfc4e6;
+        --accent: #6d3bd1;
+        --accent-strong: #5c2fb8;
+        --accent-soft: #a889f2;
+        --secondary: #c25e12;
+        --highlight: rgba(109, 59, 209, 0.08);
+        --highlight-ink: #6d3bd1;
+        --good: #047857;
+        --bad: #be123c;
+        --mono-bg: #ffffff;
+        --shadow: 0 2px 10px rgba(109, 59, 209, 0.1);
+        --sans:
+          'Geist', 'Geist Fallback', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+          Helvetica, Arial, sans-serif;
+        --mono-font:
+          'Geist Mono', 'Geist Mono Fallback', ui-monospace, 'SFMono-Regular', Consolas,
+          'Liberation Mono', Menlo, monospace;
       }
 
       * {
@@ -93,12 +49,8 @@
         margin: 0;
         background: var(--paper);
         color: var(--ink);
-        font-family:
-          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-family: var(--sans);
         line-height: 1.55;
-        transition:
-          background 0.2s ease,
-          color 0.2s ease;
       }
 
       ::selection {
@@ -107,12 +59,12 @@
       }
 
       a {
-        color: var(--accent-strong);
+        color: var(--accent);
         text-decoration-thickness: 1px;
         text-underline-offset: 2px;
       }
       a:hover {
-        color: var(--accent);
+        color: var(--accent-strong);
       }
       a:focus-visible,
       button:focus-visible {
@@ -123,9 +75,8 @@
       h1,
       h2,
       h3 {
-        font-family:
-          'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
-        font-weight: 600;
+        font-family: var(--sans);
+        font-weight: 700;
         text-wrap: balance;
         color: var(--ink);
         margin: 0;
@@ -136,9 +87,7 @@
       pre,
       .stage-output,
       .stage-cmd {
-        font-family:
-          ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo,
-          monospace;
+        font-family: var(--mono-font);
       }
 
       .wrap {
@@ -162,25 +111,29 @@
         padding: 20px 24px;
         max-width: 980px;
         margin: 0 auto;
+        border-bottom: 1px solid var(--line);
       }
 
       .topbar .brand {
-        font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+        font-family: var(--sans);
+        font-weight: 700;
         font-size: 1rem;
         letter-spacing: 0.01em;
+        background-image: linear-gradient(90deg, var(--accent), var(--secondary));
+        background-clip: text;
+        -webkit-background-clip: text;
+        color: transparent;
       }
 
-      .theme-toggle {
-        background: none;
-        border: 1px solid var(--line);
+      .topbar-link {
+        font-size: 0.82rem;
         color: var(--ink-dim);
+        text-decoration: none;
+        border: 1px solid var(--line);
         border-radius: 999px;
         padding: 6px 14px;
-        font-size: 0.78rem;
-        cursor: pointer;
-        font-family: inherit;
       }
-      .theme-toggle:hover {
+      .topbar-link:hover {
         border-color: var(--accent);
         color: var(--accent);
       }
@@ -202,7 +155,12 @@
       .hero h1 {
         font-size: clamp(1.9rem, 4.4vw, 2.7rem);
         line-height: 1.12;
-        max-width: 14ch;
+        max-width: 16ch;
+        background-image: linear-gradient(90deg, var(--accent), var(--secondary));
+        background-clip: text;
+        -webkit-background-clip: text;
+        color: transparent;
+        width: fit-content;
       }
 
       .hero .dek {
@@ -216,7 +174,7 @@
         margin-top: 32px;
         background: var(--paper-raised);
         border: 1px solid var(--line);
-        border-radius: 3px;
+        border-radius: 12px;
         box-shadow: var(--shadow);
         padding: 22px 24px;
       }
@@ -241,7 +199,7 @@
         background: var(--highlight);
         color: var(--highlight-ink);
         padding: 0.05em 0.35em;
-        border-radius: 2px;
+        border-radius: 4px;
       }
 
       .stamp {
@@ -249,13 +207,14 @@
         align-items: center;
         gap: 6px;
         margin-top: 14px;
-        border: 1.5px solid var(--good);
+        border: 1px solid var(--good);
         color: var(--good);
         font-size: 0.74rem;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        padding: 4px 10px;
-        border-radius: 2px;
+        padding: 4px 12px;
+        border-radius: 999px;
       }
       .stamp.bad {
         border-color: var(--bad);
@@ -306,7 +265,7 @@
         background: var(--line);
         border: 1px solid var(--line);
         margin-top: 24px;
-        border-radius: 3px;
+        border-radius: 12px;
         overflow: hidden;
       }
       .compare > div {
@@ -371,37 +330,48 @@
       .stage-chip {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         background: var(--paper-raised);
         border: 1px solid var(--line);
-        padding: 10px 14px;
+        border-radius: 10px;
+        padding: 8px 14px;
         font-family: inherit;
         color: var(--ink);
         cursor: pointer;
         flex: none;
         font-size: 0.86rem;
+        font-weight: 500;
         text-align: left;
         transition:
-          border-color 0.12s ease,
-          background 0.12s ease;
+          border-color 0.15s ease,
+          box-shadow 0.15s ease,
+          transform 0.15s ease;
       }
       .stage-chip:hover {
-        border-color: var(--accent);
+        border-color: var(--accent-soft);
+        box-shadow: var(--shadow);
+        transform: translateY(-1px);
       }
       .stage-chip.active {
-        border-color: var(--accent-strong);
+        border-color: var(--accent);
         background: var(--highlight);
-        color: var(--highlight-ink);
+        color: var(--ink);
       }
       .stage-chip .num {
-        font-family: ui-monospace, monospace;
-        font-size: 0.76rem;
-        color: var(--ink-dim);
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
         flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--good);
+        color: var(--paper);
+        font-size: 9px;
+        line-height: 1;
       }
-      .stage-chip.active .num {
-        color: var(--highlight-ink);
-        opacity: 0.7;
+      .stage-chip .num::after {
+        content: '✓';
       }
 
       .flow-arrow {
@@ -428,7 +398,7 @@
       .detail {
         margin-top: 16px;
         border: 1px solid var(--line);
-        border-radius: 3px;
+        border-radius: 12px;
         background: var(--paper-raised);
         box-shadow: var(--shadow);
       }
@@ -437,6 +407,7 @@
       }
       .detail-head .stage-name {
         font-size: 1.15rem;
+        font-weight: 700;
         margin-bottom: 4px;
       }
       .detail-head .stage-why {
@@ -448,7 +419,8 @@
         margin: 0 20px;
         padding: 10px 14px;
         background: var(--mono-bg);
-        border-radius: 2px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
         font-size: 0.78rem;
         color: var(--ink-dim);
         overflow-x: auto;
@@ -462,7 +434,8 @@
         margin: 14px 20px 20px;
         padding: 14px 16px;
         background: var(--mono-bg);
-        border-radius: 2px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
         font-size: 0.78rem;
         line-height: 1.6;
         white-space: pre-wrap;
@@ -495,8 +468,9 @@
         color: var(--ink-dim);
       }
       .swap-layer {
-        font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
-        font-size: 0.98rem;
+        font-family: var(--sans);
+        font-weight: 600;
+        font-size: 0.94rem;
         padding-top: 1px;
       }
       .swap-default {
@@ -537,7 +511,7 @@
       /* ── Footer ───────────────────────────────────────────────────────── */
 
       footer {
-        padding: 40px 0 56px;
+        padding: 24px 0 56px;
         color: var(--ink-dim);
         font-size: 0.86rem;
       }
@@ -550,6 +524,22 @@
         color: var(--accent);
         text-decoration-color: var(--accent);
       }
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        padding-top: 16px;
+        margin-top: 16px;
+        border-top: 1px solid var(--line);
+        font-size: 0.82rem;
+      }
+      .footer-links a {
+        text-decoration: none;
+        color: var(--accent);
+      }
+      .footer-links a:hover {
+        text-decoration: underline;
+      }
 
       @media (prefers-reduced-motion: reduce) {
         * {
@@ -560,8 +550,14 @@
   </head>
   <body>
     <div class="topbar">
-      <span class="brand">How RAG works</span>
-      <button class="theme-toggle" id="themeToggle" type="button">Toggle theme</button>
+      <span class="brand">code-documentation-assistant</span>
+      <a
+        class="topbar-link"
+        href="https://github.com/thalaivar-subu/code-documentation-assistant"
+        target="_blank"
+        rel="noreferrer"
+        >View on GitHub</a
+      >
     </div>
 
     <main class="wrap">
@@ -605,7 +601,7 @@
             >
           </div>
           <span class="stamp bad"
-            ><span class="stamp-dot"></span> 0 citations — flagged, not hidden</span
+            ><span class="stamp-dot"></span> 0 citations — surfaced in the trace, not hidden</span
           >
         </div>
       </section>
@@ -781,6 +777,29 @@
           A short field guide to Retrieval-Augmented Generation, worked through on real, cited
           output.
         </p>
+        <div class="footer-links">
+          <a
+            href="https://github.com/thalaivar-subu/code-documentation-assistant"
+            target="_blank"
+            rel="noreferrer"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/thalaivar-subu/code-documentation-assistant/blob/main/docs/ARCHITECTURE.md"
+            target="_blank"
+            rel="noreferrer"
+            >Architecture</a
+          >
+          <a
+            href="https://github.com/thalaivar-subu/code-documentation-assistant/blob/main/docs/DECISIONS.md"
+            target="_blank"
+            rel="noreferrer"
+            >Decisions</a
+          >
+          <a href="https://www.linkedin.com/in/subramanian-ve/" target="_blank" rel="noreferrer"
+            >LinkedIn</a
+          >
+        </div>
       </footer>
     </main>
 
@@ -990,7 +1009,8 @@
             btn.type = 'button';
             btn.className = 'stage-chip';
             btn.dataset.id = s.id;
-            btn.innerHTML = '<span class="num">' + s.order + '</span><span>' + s.title + '</span>';
+            btn.innerHTML =
+              '<span class="num" aria-hidden="true"></span><span>' + s.title + '</span>';
             btn.addEventListener('click', function () {
               selectStage(s.id);
             });
@@ -1034,25 +1054,6 @@
         render('ingest', 'flow-ingest');
         render('query', 'flow-query');
         selectStage('clone');
-
-        // ── Theme toggle ── (initial restore already happened in <head>, before paint)
-        var root = document.documentElement;
-        var toggle = document.getElementById('themeToggle');
-        toggle.addEventListener('click', function () {
-          var current = root.getAttribute('data-theme');
-          var next =
-            current === 'dark'
-              ? 'light'
-              : current === 'light'
-                ? 'dark'
-                : window.matchMedia('(prefers-color-scheme: dark)').matches
-                  ? 'light'
-                  : 'dark';
-          root.setAttribute('data-theme', next);
-          try {
-            localStorage.setItem('rag-theme', next);
-          } catch (e) {}
-        });
       })();
     </script>
   </body>
