@@ -52,6 +52,25 @@ stage README with a real example run.
 
 ---
 
+## Screenshots
+
+**Ask a repo** — index any repo, ask a question, watch all 12 pipeline stages run live, with an
+always-visible reference flowchart alongside and a history of recent questions:
+
+![Ask a repo tab, showing a live question and answer against telemetry-go](./assets/ui-ask-a-repo.png)
+
+**Understand the RAG pipeline** — click any stage to see its real, captured output, no indexing
+required:
+
+![Understand the RAG pipeline tab, showing the Clone stage's real captured output](./assets/ui-understand-pipeline.png)
+
+**Test suite** — 172 tests passing, real embedder/reranker/LLM on the model-facing paths (mocks
+only where a specific unit needs isolating — see [docs/ENGINEERING.md](./docs/ENGINEERING.md)):
+
+![vitest run showing 172 passed tests across 20 files](./assets/test-report.png)
+
+---
+
 ## How it works
 
 Two pipelines: **ingest** (offline, once per repo, then incremental) and **query** (online, per
