@@ -82,7 +82,7 @@ export async function runQueryLoop(
       limit: opts.limit,
       dbPath: opts.dbPath,
     });
-    expanded = expandResults(allChunks, reranked);
+    expanded = expandResults(allChunks, reranked, { intent: route.intent });
 
     const grade = gradeContext(expanded, route, hop, { maxHops });
     const hopTrace: HopTrace = { hop, query, grade };

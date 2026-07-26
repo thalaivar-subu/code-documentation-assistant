@@ -59,13 +59,13 @@ async function main(): Promise<void> {
   console.log(`  intent     ${route.intent}`);
   console.log(`  reranked   ${reranked.length} hits`);
 
-  const expanded = expandResults(chunks, reranked);
+  const expanded = expandResults(chunks, reranked, { intent: route.intent });
   const graphAdded = expanded.length - reranked.length;
   console.log(`  expand     +${graphAdded} chunk(s) via the symbol graph\n`);
 
   for (const h of expanded) {
     console.log(
-      `  [${h.via.padEnd(7)}] ${h.symbolName.padEnd(24)} ${h.filePath}:${h.startLine}-${h.endLine}`,
+      `  [${h.via.padEnd(8)}] ${h.symbolName.padEnd(24)} ${h.filePath}:${h.startLine}-${h.endLine}`,
     );
   }
   console.log('\n────────────────────────────────────────────────────────────────\n');

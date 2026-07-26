@@ -88,4 +88,40 @@ describe('gradeContext', () => {
     const result = gradeContext(expanded, route(), 0, { maxHops: 3 });
     expect(result.sufficient).toBe(false);
   });
+
+  it('a manifest question is sufficient once a manifest chunk was found, even with a terrible rerank score', () => {
+    // The whole point: manifest chunks are added with rerankScore 0 by
+    // construction (see expand.ts) — if this used the generic rerank-score
+    // check, it would never be satisfied.
+    const expanded = [
+      hit({ id: 'code', rerankScore: 0.0001, via: 'rerank' }),
+      hit({ id: 'gomod', filePath: 'go.mod', rerankScore: 0, via: 'manifest' }),
+    ];
+    const result = gradeContext(expanded, route({ intent: 'manifest' }), 0, {
+      minRerankScore: 0.01,
+    });
+    expect(result.sufficient).toBe(true);
+    expect(result.reason).toMatch(/manifest/);
+  });
+
+  it('recognizes a manifest file that scored well enough to be a genuine via:"rerank" hit, not just via:"manifest"', () => {
+    // Regression: a manifest file can legitimately reach `expanded` as a real
+    // rerank hit (it scored well on its own), tagged 'rerank' rather than
+    // 'manifest' — that must still count as "found", or the loop wastefully
+    // burns an extra hop even though go.mod was already right there.
+    const expanded = [hit({ id: 'gomod', filePath: 'go.mod', rerankScore: 0.76, via: 'rerank' })];
+    const result = gradeContext(expanded, route({ intent: 'manifest' }), 0, {
+      minRerankScore: 0.01,
+    });
+    expect(result.sufficient).toBe(true);
+  });
+
+  it('a manifest question is insufficient when no manifest chunk exists in the repo', () => {
+    const expanded = [hit({ id: 'code', rerankScore: 0.5, via: 'rerank' })];
+    const result = gradeContext(expanded, route({ intent: 'manifest' }), 0, {
+      minRerankScore: 0.01,
+    });
+    expect(result.sufficient).toBe(false);
+    expect(result.reason).toMatch(/no dependency-manifest file/);
+  });
 });

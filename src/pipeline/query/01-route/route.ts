@@ -10,7 +10,7 @@
  * can't approximate.
  */
 
-export type QueryIntent = 'symbol' | 'trace' | 'concept';
+export type QueryIntent = 'symbol' | 'trace' | 'concept' | 'manifest';
 
 export interface RouteResult {
   intent: QueryIntent;
@@ -61,6 +61,33 @@ const TRACE_PHRASES = [
   'propagate to',
 ];
 
+/**
+ * "What does this project depend on" (external packages) is a different
+ * question from "what does this function depend on" (code-level tracing,
+ * already covered by TRACE_PHRASES's "depends on"/"dependencies of" — those
+ * always match first, so a phrase like "dependencies of X" still routes to
+ * 'trace'). This only catches the bare, project-level phrasing that trace
+ * phrases don't already claim — Expand (Stage 5) uses this intent to
+ * guarantee manifest files (go.mod, package.json, …) make it into context
+ * regardless of how they'd otherwise score in retrieval/rerank.
+ */
+const MANIFEST_PHRASES = [
+  'dependencies',
+  'dependency list',
+  'what packages',
+  'which packages',
+  'what libraries',
+  'which libraries',
+  'third-party librar',
+  'third party librar',
+  'requirements.txt',
+  'go.mod',
+  'package.json',
+  'go modules',
+  'npm packages',
+  'pip packages',
+];
+
 function extractByPattern(question: string, re: RegExp): string[] {
   return [...question.matchAll(re)].map((m) => m[1] ?? m[0]);
 }
@@ -71,6 +98,10 @@ function dedupe(values: string[]): string[] {
 
 function matchedTracePhrase(lowerQuestion: string): string | undefined {
   return TRACE_PHRASES.find((phrase) => lowerQuestion.includes(phrase));
+}
+
+function matchedManifestPhrase(lowerQuestion: string): string | undefined {
+  return MANIFEST_PHRASES.find((phrase) => lowerQuestion.includes(phrase));
 }
 
 export function routeQuery(question: string): RouteResult {
@@ -89,6 +120,16 @@ export function routeQuery(question: string): RouteResult {
       symbols,
       files,
       reason: `matched trace phrase "${tracePhrase}" — needs call/dependency graph expansion`,
+    };
+  }
+
+  const manifestPhrase = matchedManifestPhrase(question.toLowerCase());
+  if (manifestPhrase) {
+    return {
+      intent: 'manifest',
+      symbols,
+      files,
+      reason: `matched manifest phrase "${manifestPhrase}" — needs the project's dependency manifest(s), not code symbols`,
     };
   }
 

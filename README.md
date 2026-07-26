@@ -78,6 +78,8 @@ local embeddings, the local-LLM default vs. the managed-service swap, and how ev
 New to this space? Start with **[docs/LEARNING-PATH.md](./docs/LEARNING-PATH.md)**.
 Prepping for the discussion? **[docs/INTERVIEW-QA.md](./docs/INTERVIEW-QA.md)**.
 Curious what building this actually cost in tokens? **[docs/COST.md](./docs/COST.md)**.
+How would this run on AWS/GCP/Azure/Cloudflare for real? **[docs/PRODUCTIONIZE.md](./docs/PRODUCTIONIZE.md)**.
+What engineering standards did this actually follow (and skip)? **[docs/ENGINEERING.md](./docs/ENGINEERING.md)**.
 
 ---
 

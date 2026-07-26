@@ -88,8 +88,22 @@ event: done
 data: {"answer":"The function `RecordTaskDuration` is called by the `InstrumentProcessor` function.","citations":[],"verify":{"resolvedCount":0,"totalCount":0,"resolutionRate":0,"hasCitations":false, ...}, ...}
 ```
 
-Same 0-citation case Stage 8's README documents — the API doesn't hide it, and neither does the UI
-(it renders the `⚠ answer cited nothing` badge directly off `verify.hasCitations`).
+Same 0-citation case Stage 8's README documents — the API doesn't hide it: `verify.hasCitations`
+is `false` here, and the UI reads that field directly to decide whether to show a citations-resolved
+count at all (it doesn't, when there's nothing to report) versus surfacing the real retrieved
+context (`expanded`) so a user can judge groundedness themselves instead of trusting a citation
+that was never there — see `web/README.md`'s "pipeline trace" section.
+
+## Bounding an open, unauthenticated `/index`
+
+Nothing gates who can call `/index`, so an unbounded number of distinct repos would otherwise
+accumulate forever on disk. `index-stream.ts` enforces `MAX_INDEXED_REPOS` (default 20, override via
+the env var of the same name): indexing a **new** repoId once already at the limit evicts the
+least-recently-indexed repo first (`lexical-store.ts`'s `findLeastRecentlyIndexedRepoId`, using the
+lexical index file's mtime as an LRU proxy — indexing bumps it, asking doesn't, so it's "least
+recently indexed" rather than a perfectly tracked "least recently used," a deliberate simplification
+over adding a separate access-tracking store). Re-indexing an **existing** repoId never triggers
+eviction — the count doesn't grow.
 
 ## Verify
 

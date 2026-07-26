@@ -196,4 +196,73 @@ describe('expandResults', () => {
     const expanded = expandResults([isolated], [rerankedHit(isolated)], {});
     expect(expanded).toEqual([{ ...rerankedHit(isolated), via: 'rerank' }]);
   });
+
+  describe('manifest intent', () => {
+    it('adds go.mod even though nothing about it scored well in retrieval', () => {
+      const goMod = chunk({
+        id: 'gomod',
+        kind: 'config',
+        configFormat: 'gomod',
+        filePath: 'go.mod',
+        symbolName: 'go.mod',
+        symbolType: 'file',
+        content: 'module example.com/telemetry\n\nrequire github.com/gin-gonic/gin v1.9.0',
+      });
+      const unrelatedCode = chunk({
+        id: 'code',
+        symbolName: 'InitLogger',
+        content: 'func InitLogger() {}',
+      });
+      // Nothing matched go.mod through retrieval/rerank at all — it's not
+      // even in `reranked` — Expand has to add it purely from `allChunks`.
+      const reranked = [rerankedHit(unrelatedCode)];
+
+      const expanded = expandResults([goMod, unrelatedCode], reranked, { intent: 'manifest' });
+      expect(expanded.some((h) => h.id === 'gomod' && h.via === 'manifest')).toBe(true);
+    });
+
+    it('does not add manifest chunks for a non-manifest intent', () => {
+      const goMod = chunk({
+        id: 'gomod',
+        kind: 'config',
+        configFormat: 'gomod',
+        filePath: 'go.mod',
+        symbolName: 'go.mod',
+        symbolType: 'file',
+      });
+      const code = chunk({ id: 'code', symbolName: 'InitLogger', content: 'func InitLogger() {}' });
+      const expanded = expandResults([goMod, code], [rerankedHit(code)], {});
+      expect(expanded.some((h) => h.id === 'gomod')).toBe(false);
+    });
+
+    it('does not treat an arbitrary config file (not a manifest) as a dependency list', () => {
+      const dockerCompose = chunk({
+        id: 'compose',
+        kind: 'config',
+        configFormat: 'compose',
+        filePath: 'docker-compose.yml',
+        symbolName: 'docker-compose.yml',
+        symbolType: 'file',
+      });
+      const code = chunk({ id: 'code', symbolName: 'InitLogger', content: 'func InitLogger() {}' });
+      const expanded = expandResults([dockerCompose, code], [rerankedHit(code)], {
+        intent: 'manifest',
+      });
+      expect(expanded.some((h) => h.id === 'compose')).toBe(false);
+    });
+
+    it('does not duplicate a manifest chunk that already made it in via rerank', () => {
+      const goMod = chunk({
+        id: 'gomod',
+        kind: 'config',
+        configFormat: 'gomod',
+        filePath: 'go.mod',
+        symbolName: 'go.mod',
+        symbolType: 'file',
+      });
+      const expanded = expandResults([goMod], [rerankedHit(goMod)], { intent: 'manifest' });
+      expect(expanded.filter((h) => h.id === 'gomod')).toHaveLength(1);
+      expect(expanded[0].via).toBe('rerank');
+    });
+  });
 });

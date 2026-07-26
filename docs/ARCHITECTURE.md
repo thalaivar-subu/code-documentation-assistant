@@ -124,7 +124,7 @@ flowchart LR
 
 | #   | Stage    | Role                                               | Tool                                  | ADR                    |
 | --- | -------- | -------------------------------------------------- | ------------------------------------- | ---------------------- |
-| 1   | Route    | Classify: symbol lookup vs conceptual vs trace     | heuristics, no LLM call               | —                      |
+| 1   | Route    | Classify: symbol / concept / trace / manifest      | heuristics, no LLM call               | —                      |
 | 2   | Retrieve | Dense (vectors) **and** lexical (BM25) in parallel | LanceDB + MiniSearch                  | [0004](./DECISIONS.md) |
 | 3   | Fuse     | Merge the two ranked lists                         | Reciprocal Rank Fusion                | [0004](./DECISIONS.md) |
 | 4   | Rerank   | Score (query, chunk) pairs together; 50 → 8        | cross-encoder (Transformers.js)       | [0005](./DECISIONS.md) |

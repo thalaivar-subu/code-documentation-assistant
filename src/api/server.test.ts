@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { deleteLexicalIndexFile, indexPath } from '../pipeline/ingest/04-index/lexical-store.ts';
+import {
+  deleteVectorsByRepoId,
+  getSharedVectorStore,
+} from '../pipeline/ingest/04-index/vector-store.ts';
+import { invalidateAskCache } from './ask-stream.ts';
 import { repoChunks } from './repo-cache.ts';
 import { buildServer } from './server.ts';
 
@@ -84,38 +90,50 @@ describe('POST /index → POST /ask — full real pipeline over HTTP', () => {
     const { repoId } = done!.data as { repoId: string };
     expect(repoId).toBeTruthy();
 
-    const askRes = await app.inject({
-      method: 'POST',
-      url: '/ask',
-      payload: { repoId, question: 'what does chunkRepo do?', maxTokens: 100 },
-    });
-    const askEvents = parseSse(askRes.body);
-    expect(askEvents.some((e) => e.event === 'route')).toBe(true);
-    expect(askEvents.some((e) => e.event === 'hop')).toBe(true);
-    expect(askEvents.some((e) => e.event === 'token')).toBe(true);
-    const askDone = askEvents.find((e) => e.event === 'done');
-    expect(askDone).toBeDefined();
-    const data = askDone!.data as { answer: string; citations: unknown[] };
-    expect(typeof data.answer).toBe('string');
-    expect(Array.isArray(data.citations)).toBe(true);
+    try {
+      const askRes = await app.inject({
+        method: 'POST',
+        url: '/ask',
+        payload: { repoId, question: 'what does chunkRepo do?', maxTokens: 100 },
+      });
+      const askEvents = parseSse(askRes.body);
+      expect(askEvents.some((e) => e.event === 'route')).toBe(true);
+      expect(askEvents.some((e) => e.event === 'hop')).toBe(true);
+      expect(askEvents.some((e) => e.event === 'token')).toBe(true);
+      const askDone = askEvents.find((e) => e.event === 'done');
+      expect(askDone).toBeDefined();
+      const data = askDone!.data as { answer: string; citations: unknown[] };
+      expect(typeof data.answer).toBe('string');
+      expect(Array.isArray(data.citations)).toBe(true);
 
-    // GET /repos is disk-backed (lexical-store's directory listing), so the
-    // repo just indexed above should show up without needing repoChunks.
-    const reposRes = await app.inject({ method: 'GET', url: '/repos' });
-    expect(reposRes.statusCode).toBe(200);
-    const repos = reposRes.json() as { repoId: string; chunksIndexed: number }[];
-    expect(repos.some((r) => r.repoId === repoId && r.chunksIndexed > 0)).toBe(true);
+      // GET /repos is disk-backed (lexical-store's directory listing), so the
+      // repo just indexed above should show up without needing repoChunks.
+      const reposRes = await app.inject({ method: 'GET', url: '/repos' });
+      expect(reposRes.statusCode).toBe(200);
+      const repos = reposRes.json() as { repoId: string; chunksIndexed: number }[];
+      expect(repos.some((r) => r.repoId === repoId && r.chunksIndexed > 0)).toBe(true);
 
-    // Simulate a server restart losing the in-memory repoChunks cache — /ask
-    // should reconstruct chunks from the vector store instead of 404ing.
-    repoChunks.delete(repoId);
-    const askAfterRestartRes = await app.inject({
-      method: 'POST',
-      url: '/ask',
-      payload: { repoId, question: 'what does chunkRepo do?', maxTokens: 20 },
-    });
-    expect(askAfterRestartRes.statusCode).toBe(200);
-    const reconstructedDone = parseSse(askAfterRestartRes.body).find((e) => e.event === 'done');
-    expect(reconstructedDone).toBeDefined();
+      // Simulate a server restart losing the in-memory repoChunks cache — /ask
+      // should reconstruct chunks from the vector store instead of 404ing.
+      repoChunks.delete(repoId);
+      const askAfterRestartRes = await app.inject({
+        method: 'POST',
+        url: '/ask',
+        payload: { repoId, question: 'what does chunkRepo do?', maxTokens: 20 },
+      });
+      expect(askAfterRestartRes.statusCode).toBe(200);
+      const reconstructedDone = parseSse(askAfterRestartRes.body).find((e) => e.event === 'done');
+      expect(reconstructedDone).toBeDefined();
+    } finally {
+      // This test indexes "." (this repo) into the SAME shared .cache/ a real
+      // dev server also reads from — without this cleanup, every `npm test`
+      // run would leave a permanent, real-looking "code-documentation-assistant"
+      // entry in GET /repos for an actual user to be confused by.
+      const db = await getSharedVectorStore();
+      await deleteVectorsByRepoId(db, repoId);
+      await deleteLexicalIndexFile(indexPath(repoId));
+      invalidateAskCache(repoId);
+      repoChunks.delete(repoId);
+    }
   }, 120_000);
 });

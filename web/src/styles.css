@@ -345,11 +345,6 @@ button.primary:disabled {
   color: var(--text-dim);
 }
 
-.badge-warn {
-  border-color: var(--warn);
-  color: var(--warn);
-}
-
 .chunk-card {
   background: var(--bg);
   border: 1px solid var(--border);

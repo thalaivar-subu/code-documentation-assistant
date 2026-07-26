@@ -15,8 +15,13 @@ Route, Grade is a handful of cheap, explainable heuristics instead of an LLM-as-
 
 1. **Hop limit** — a hard stop (default 3) so the loop can never run forever.
 2. **Nothing found** — zero candidates is never sufficient.
-3. **Confidence** — the best rerank score must clear a threshold (default `0.01`).
-4. **`trace` questions specifically need graph edges** — finding the named function isn't enough
+3. **`manifest` questions are satisfied by finding a manifest file, full stop** — checked before the
+   rerank-score check, because manifest chunks are added with `rerankScore: 0` by construction (see
+   `05-expand/README.md`); the generic confidence check would be testing the wrong thing entirely
+   for this intent and would never be satisfied. Checked by filename, not by `via` tag, since a
+   manifest file can also legitimately arrive as a genuine `via: 'rerank'` hit.
+4. **Confidence** — the best rerank score must clear a threshold (default `0.01`).
+5. **`trace` questions specifically need graph edges** — finding the named function isn't enough
    if the question was about its callers; Stage 5 (Expand) must have found at least one edge.
 
 Revisit once Generate's LLM adapter exists — an LLM judging its own upcoming context is a natural
@@ -73,11 +78,38 @@ the loop resolves in a **single** hop — that's the common, correct case, not a
 see `query-loop.test.ts` for a synthetic scenario that forces and proves the multi-hop path
 deterministically (rather than depending on a real repo's specific embedding scores).
 
+## Example output — a manifest question, resolved in one hop
+
+The exact question that used to fail honestly ("the dependencies aren't in the provided context")
+before Route/Expand/Grade's `manifest` intent existed — now resolves confidently on the first hop
+because Grade recognizes `go.mod` regardless of its (zero, by construction) rerank score:
+
+```bash
+npm run grade -- https://github.com/thalaivar-subu/telemetry-go "Give me the dependencies bro" --max-hops 3 --k 20 --limit 3
+```
+
+```
+  question   "Give me the dependencies bro"
+  intent     manifest
+
+  hop 0  query="Give me the dependencies bro"
+         sufficient — found the project's dependency manifest file(s)
+
+  final context (11 chunks):
+    [rerank ] constants.go             telemetry/constants.go:1-22
+    [rerank ] TestGinInstrumentationMiddlewares telemetry/middleware_test.go:64-116
+    [rerank ] TestInstrumentationMiddlewares telemetry/middleware_test.go:10-62
+    [manifest] go.mod                   go.mod:1-68
+    [callee ] TelemetryEnabled         telemetry/initializer.go:13-15
+    ...
+```
+
 ## Verify
 
 ```bash
-npm test -- 06-grade                                                                                            # grading heuristics (8 cases) + real 2-store multi-hop termination proof
+npm test -- 06-grade                                                                                            # grading heuristics (11 cases, incl. manifest) + real 2-store multi-hop termination proof
 npm run grade -- https://github.com/thalaivar-subu/telemetry-go "who triggers newPropagator internally?" --max-hops 3 --k 2 --limit 1
+npm run grade -- https://github.com/thalaivar-subu/telemetry-go "Give me the dependencies bro" --max-hops 3 --k 20 --limit 3
 ```
 
 ## Output feeds → Stage 7 (Generate)

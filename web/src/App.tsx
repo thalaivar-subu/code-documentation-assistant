@@ -27,7 +27,19 @@ export function App() {
           </button>
         </div>
       </header>
-      <main className="tab-panel">{tab === 'ask' ? <AskTab /> : <UnderstandTab />}</main>
+      <main className="tab-panel">
+        {/* Both tabs stay mounted and are only hidden via CSS — conditionally
+            rendering one or the other would unmount the inactive tab, and
+            React throws away all its useState (indexed repo, asked question,
+            streamed answer, everything) on unmount. Switching tabs should
+            never lose an in-progress index/ask. */}
+        <div style={{ display: tab === 'ask' ? 'block' : 'none' }}>
+          <AskTab />
+        </div>
+        <div style={{ display: tab === 'understand' ? 'block' : 'none' }}>
+          <UnderstandTab />
+        </div>
+      </main>
     </div>
   );
 }

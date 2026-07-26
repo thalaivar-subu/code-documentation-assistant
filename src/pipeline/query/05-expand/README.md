@@ -6,7 +6,26 @@
 
 `expandResults(allChunks, reranked, opts)` → `ExpandedHit[]` — every reranked hit (`via: 'rerank'`)
 plus up to `maxTotal` (default 10) chunks pulled in via the graph (`via: 'caller' | 'callee'`),
-capped at `maxPerHit` (default 3) per reranked hit.
+capped at `maxPerHit` (default 3) per reranked hit. When `opts.intent === 'manifest'` (Route's
+4th intent — see [`01-route/README.md`](../01-route/README.md)), also adds every dependency-manifest
+chunk found (`go.mod`, `package.json`, …; `via: 'manifest'`), uncapped.
+
+## Why manifest questions need a special case
+
+"What are this project's dependencies?" has nothing to do with the call graph, and Retrieve/Rerank
+can't be trusted to rank a manifest file highly for a casually-phrased question — a raw sentence's
+embedding doesn't resemble a `require`/`dependencies` block, and BM25 has no reason to favor
+`go.mod` over any other file containing the word "dependency". Without this, the LLM would
+correctly (and unhelpfully) answer "the dependencies aren't in the provided context" — a real,
+confirmed failure mode this stage fixes by guaranteeing the manifest is in context regardless of
+how it scores. Matched by exact basename (`go.mod`, `package.json`, `requirements.txt`, `Cargo.toml`,
+`pom.xml`, `build.gradle`, …), not by `configFormat` — `configFormat` groups by file _type_
+(json/toml/yaml), which is too broad (a `tsconfig.json` is also configFormat `json` but isn't a
+dependency list).
+
+A manifest file can still legitimately score well enough to be a genuine `via: 'rerank'` hit on its
+own — Stage 6 (Grade)'s manifest check looks for the file by name, not by `via` tag, so either path
+satisfies it. See [`06-grade/README.md`](../06-grade/README.md).
 
 ## Honest scope: name-based, not semantic
 
@@ -72,6 +91,38 @@ nothing earlier in this pipeline could produce. The other `[caller]`/`[callee]` 
 the _other_ 7 reranked hits, not necessarily to `RecordTaskDuration` specifically — expansion runs
 per reranked hit across the whole set, and this output doesn't (yet) label which hit each edge
 came from.
+
+### Manifest injection — `go.mod` guaranteed in, even outside the rerank cutoff
+
+```bash
+npm run expand -- https://github.com/thalaivar-subu/telemetry-go "Give me the dependencies bro" --k 20 --limit 3
+```
+
+```
+  question   "Give me the dependencies bro"
+  intent     manifest
+  reranked   3 hits
+  expand     +8 chunk(s) via the symbol graph
+
+  [rerank  ] constants.go             telemetry/constants.go:1-22
+  [rerank  ] TestGinInstrumentationMiddlewares telemetry/middleware_test.go:64-116
+  [rerank  ] TestInstrumentationMiddlewares telemetry/middleware_test.go:10-62
+  [manifest] go.mod                   go.mod:1-68
+  [callee  ] TelemetryEnabled         telemetry/initializer.go:13-15
+  [callee  ] GinInstrumentationMiddlewares telemetry/middleware.go:25-35
+  [callee  ] GinInstrumentationHandler telemetry/gin.go:14-30
+  [callee  ] OtelginWithLogging       telemetry/middleware.go:45-51
+  [callee  ] InstrumentationMiddlewares telemetry/middleware.go:13-23
+  [callee  ] InstrumentationHandler   telemetry/mux.go:41-58
+  [callee  ] OtelMuxWithLogging       telemetry/middleware.go:37-43
+```
+
+With `--limit 3`, `go.mod` didn't make Rerank's cut on its own merit — none of the 3 reranked hits
+are it. It's in context anyway, tagged `[manifest]`, because Route classified this question's
+intent as `manifest`. Without this stage's special case, the LLM would receive zero mention of
+`go.mod` and correctly report "the dependencies aren't in the provided context" — a real, previously
+confirmed failure mode (see `06-grade/README.md`'s example of the same question resolving in one
+hop once this was fixed).
 
 ## Verify
 

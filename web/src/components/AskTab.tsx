@@ -66,6 +66,24 @@ export function AskTab() {
     });
   }
 
+  /**
+   * Editing the repo field invalidates whatever is currently indexed — without
+   * this, a pill click (or an earlier index) stays "active" while a completely
+   * different, not-yet-indexed URL sits in the box, with no visible link
+   * between the two. Forces an explicit re-index or re-pick instead of asking
+   * against a target the user can no longer see confirmed anywhere.
+   */
+  function handleRepoInputChange(value: string) {
+    setRepo(value);
+    if (indexResult) {
+      setIndexResult(null);
+      setAskResult(null);
+      setAnswer('');
+      setRoute(null);
+      setHops([]);
+    }
+  }
+
   async function handleIndex() {
     setIndexing(true);
     setIndexLog([]);
@@ -165,11 +183,18 @@ export function AskTab() {
     <div>
       <section className="panel">
         <h2>1. Index a repo</h2>
+        <p className="stage-explain">
+          AST-aware chunking for <span className="badge">TypeScript</span>{' '}
+          <span className="badge">JavaScript</span> <span className="badge">Python</span>{' '}
+          <span className="badge">Java</span> <span className="badge">Go</span> — plus structural
+          chunking for config/build files (JSON, YAML, TOML, Dockerfile, Terraform, …). Anything
+          else in the repo is skipped, not garbled.
+        </p>
         <div className="row">
           <input
             type="text"
             value={repo}
-            onChange={(e) => setRepo(e.target.value)}
+            onChange={(e) => handleRepoInputChange(e.target.value)}
             placeholder="https://github.com/owner/repo or a local path"
           />
           <button className="primary" onClick={handleIndex} disabled={indexing || !repo}>
@@ -220,15 +245,14 @@ export function AskTab() {
             {asking ? 'Asking…' : 'Ask'}
           </button>
         </div>
-        {!indexResult && <p className="stage-explain">Index a repo first.</p>}
-        <PipelineBar stages={queryStages} />
-        {route && (
+        {indexResult ? (
           <p className="stage-explain">
-            intent: <strong>{route.intent}</strong>
-            {route.symbols.length > 0 && <> · symbols: {route.symbols.join(', ')}</>} —{' '}
-            {route.reason}
+            Asking against <span className="badge">{indexResult.repoId}</span>
           </p>
+        ) : (
+          <p className="stage-explain">Index a repo first.</p>
         )}
+        <PipelineBar stages={queryStages} />
         {(answer || asking) && (
           <div className="chunk-card">
             <div className="answer">{answer || '…'}</div>
@@ -236,49 +260,74 @@ export function AskTab() {
         )}
         {askResult && (
           <>
-            <p className="stage-explain" style={{ marginTop: 12 }}>
-              {askResult.verify.hasCitations ? (
-                <>
-                  citations: {askResult.verify.resolvedCount}/{askResult.verify.totalCount} resolved
-                </>
-              ) : (
-                <span className="badge badge-warn">
-                  ⚠ answer didn't cite a file:line — judge it against the context below yourself
-                </span>
-              )}
-            </p>
-            {askResult.citations.length > 0 && (
-              <ul className="citation-list">
-                {askResult.verify.checks.map((c, i) => (
-                  <li key={i}>
-                    <span className={c.resolved ? 'mark-ok' : 'mark-bad'}>
-                      {c.resolved ? '✓' : '✗'}
-                    </span>
-                    <span>
-                      {c.citation.filePath}:{c.citation.startLine}-{c.citation.endLine}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+            {askResult.verify.hasCitations && (
+              <p className="stage-explain" style={{ marginTop: 12 }}>
+                citations: {askResult.verify.resolvedCount}/{askResult.verify.totalCount} resolved
+              </p>
             )}
-            {askResult.expanded.length > 0 && (
-              <details style={{ marginTop: 10 }}>
-                <summary className="stage-explain" style={{ cursor: 'pointer', marginBottom: 0 }}>
-                  Context the model actually saw ({askResult.expanded.length} chunks) — whether or
-                  not the answer cited them
-                </summary>
-                <ul className="citation-list" style={{ marginTop: 8 }}>
-                  {askResult.expanded.map((hit) => (
-                    <li key={hit.id}>
-                      <span className="badge">{hit.via}</span>
-                      <span>
-                        {hit.symbolName} — {hit.filePath}:{hit.startLine}-{hit.endLine}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
+            <details style={{ marginTop: 6 }}>
+              <summary className="stage-explain" style={{ cursor: 'pointer', marginBottom: 0 }}>
+                Show pipeline trace — how this answer was reached
+              </summary>
+              <div style={{ marginTop: 10 }}>
+                {route && (
+                  <p className="stage-explain">
+                    <strong>Route</strong> — intent: {route.intent}
+                    {route.symbols.length > 0 && <> · symbols: {route.symbols.join(', ')}</>} —{' '}
+                    {route.reason}
+                  </p>
+                )}
+                {hops.length > 0 && (
+                  <div className="stage-explain">
+                    <strong>Grade loop</strong> ({hops.length} hop{hops.length > 1 ? 's' : ''})
+                    <ul className="citation-list">
+                      {hops.map((h) => (
+                        <li key={h.hop}>
+                          <span className={h.grade.sufficient ? 'mark-ok' : 'mark-bad'}>
+                            {h.grade.sufficient ? '✓' : '↻'}
+                          </span>
+                          <span>
+                            hop {h.hop}: "{h.query}" — {h.grade.reason}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {askResult.expanded.length > 0 && (
+                  <div className="stage-explain">
+                    <strong>Context used</strong> ({askResult.expanded.length} chunks)
+                    <ul className="citation-list">
+                      {askResult.expanded.map((hit) => (
+                        <li key={hit.id}>
+                          <span className="badge">{hit.via}</span>
+                          <span>
+                            {hit.symbolName} — {hit.filePath}:{hit.startLine}-{hit.endLine}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {askResult.citations.length > 0 && (
+                  <div className="stage-explain">
+                    <strong>Citations checked</strong>
+                    <ul className="citation-list">
+                      {askResult.verify.checks.map((c, i) => (
+                        <li key={i}>
+                          <span className={c.resolved ? 'mark-ok' : 'mark-bad'}>
+                            {c.resolved ? '✓' : '✗'}
+                          </span>
+                          <span>
+                            {c.citation.filePath}:{c.citation.startLine}-{c.citation.endLine}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </details>
           </>
         )}
         {askError && <p className="stage-explain mark-bad">✗ {askError}</p>}

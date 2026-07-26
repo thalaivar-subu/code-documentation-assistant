@@ -103,7 +103,7 @@ export function indexRepo(
 }
 
 export interface RouteEvent {
-  intent: 'symbol' | 'trace' | 'concept';
+  intent: 'symbol' | 'trace' | 'concept' | 'manifest';
   symbols: string[];
   files: string[];
   reason: string;
@@ -123,7 +123,7 @@ export interface ExpandedHitDto {
   rerankScore: number;
   rrfScore: number;
   sources: ('vector' | 'lexical')[];
-  via: 'rerank' | 'caller' | 'callee';
+  via: 'rerank' | 'caller' | 'callee' | 'manifest';
 }
 export interface AskDoneEvent {
   answer: string;

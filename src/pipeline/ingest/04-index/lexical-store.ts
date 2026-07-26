@@ -13,7 +13,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import MiniSearch from 'minisearch';
 
@@ -71,6 +71,29 @@ export async function listIndexedRepoIds(dir: string = DEFAULT_INDEX_DIR): Promi
   }
 }
 
+/**
+ * The repoId whose index file was written longest ago — used as an LRU proxy
+ * to evict when MAX_INDEXED_REPOS is reached. Not a perfect "last used" (asking
+ * a repo doesn't touch this file, only indexing it does), but re-indexing bumps
+ * it, and the common pattern — index a repo, ask it a few things, move on to
+ * the next — makes "oldest indexed" a reasonable stand-in without adding a
+ * separate access-tracking store. Returns `undefined` for an empty directory.
+ */
+export async function findLeastRecentlyIndexedRepoId(
+  dir: string = DEFAULT_INDEX_DIR,
+): Promise<string | undefined> {
+  const repoIds = await listIndexedRepoIds(dir);
+  if (repoIds.length === 0) return undefined;
+
+  const withMtimes = await Promise.all(
+    repoIds.map(async (repoId) => ({
+      repoId,
+      mtimeMs: (await stat(indexPath(repoId, dir))).mtimeMs,
+    })),
+  );
+  return withMtimes.reduce((oldest, cur) => (cur.mtimeMs < oldest.mtimeMs ? cur : oldest)).repoId;
+}
+
 export async function loadLexicalIndex(path: string): Promise<MiniSearch<LexicalDoc>> {
   try {
     const raw = await readFile(path, 'utf8');
@@ -107,6 +130,12 @@ export function getCachedLexicalIndex(path: string): Promise<MiniSearch<LexicalD
 
 export function invalidateCachedLexicalIndex(path: string): void {
   lexicalCache.delete(path);
+}
+
+/** Removes a repo's lexical index file — see `deleteVectorsByRepoId`'s doc comment for why. */
+export async function deleteLexicalIndexFile(path: string): Promise<void> {
+  invalidateCachedLexicalIndex(path);
+  await rm(path, { force: true });
 }
 
 export async function saveLexicalIndex(path: string, index: MiniSearch<LexicalDoc>): Promise<void> {

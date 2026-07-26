@@ -6,7 +6,7 @@
  * and the JSON persistence round-trip preserves search behavior.
  */
 
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import MiniSearch from 'minisearch';
 import {
+  findLeastRecentlyIndexedRepoId,
   indexPath,
   loadLexicalIndex,
   saveLexicalIndex,
@@ -118,5 +119,29 @@ describe('save/load round-trip', () => {
     expect(indexPath('repo-one', '.cache/index/lexical')).toBe(
       '.cache/index/lexical/repo-one.json',
     );
+  });
+});
+
+describe('findLeastRecentlyIndexedRepoId', () => {
+  // Deliberately tested against an isolated temp dir, not the real shared
+  // .cache/index/lexical/ a running server reads from — this function's
+  // result is what MAX_INDEXED_REPOS eviction deletes, so getting the "oldest"
+  // pick wrong here (real dir) would mean deleting a real user's real repo as
+  // a side effect of `npm test`, not just a wrong assertion.
+  it('picks the repo whose index file was written longest ago', async () => {
+    const dir = tmpDir();
+    const now = Date.parse('2026-01-01T00:00:00Z') / 1000;
+    writeFileSync(join(dir, 'newest.json'), '{}');
+    utimesSync(join(dir, 'newest.json'), now, now);
+    writeFileSync(join(dir, 'oldest.json'), '{}');
+    utimesSync(join(dir, 'oldest.json'), now - 1000, now - 1000);
+    writeFileSync(join(dir, 'middle.json'), '{}');
+    utimesSync(join(dir, 'middle.json'), now - 500, now - 500);
+
+    expect(await findLeastRecentlyIndexedRepoId(dir)).toBe('oldest');
+  });
+
+  it('returns undefined for an empty/nonexistent directory', async () => {
+    expect(await findLeastRecentlyIndexedRepoId(tmpDir())).toBeUndefined();
   });
 });

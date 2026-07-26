@@ -17,10 +17,47 @@
  * READMEs, which both call this out as a known gap).
  */
 
+import { basename } from 'node:path';
+
 import type { Chunk } from '../../../core/types.ts';
+import type { QueryIntent } from '../01-route/route.ts';
 import type { RerankedHit } from '../04-rerank/rerank.ts';
 
 const IDENTIFIER_RE = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
+
+/**
+ * Primary dependency-manifest filenames (not lockfiles — those are excluded at
+ * Discover already; see discover.ts's DEFAULT_IGNORES). Matched by exact
+ * basename rather than `configFormat`, since `configFormat` groups by file
+ * *type* (json/toml/yaml) too broadly to mean "this specific file declares
+ * dependencies" — a tsconfig.json or a k8s manifest is also configFormat
+ * 'json'/'yaml' but isn't a dependency list.
+ */
+const MANIFEST_FILENAMES = new Set([
+  'go.mod',
+  'package.json',
+  'requirements.txt',
+  'pipfile',
+  'pyproject.toml',
+  'cargo.toml',
+  'pom.xml',
+  'build.gradle',
+  'build.gradle.kts',
+  'gemfile',
+  'composer.json',
+]);
+
+/**
+ * Exported so Grade can check "is a manifest file in context at all" by
+ * filename, not by `via`. A manifest file can legitimately reach `expanded`
+ * two ways: guaranteed-injected here (tagged `via: 'manifest'`) *or* as a
+ * genuine, well-scoring `via: 'rerank'` hit if it happened to rank well on
+ * its own — Grade needs to recognize both as satisfying a manifest question,
+ * or it wastefully loops another hop even though the file was already there.
+ */
+export function isManifestFilePath(filePath: string): boolean {
+  return MANIFEST_FILENAMES.has(basename(filePath).toLowerCase());
+}
 
 export interface SymbolGraph {
   /** chunk id -> ids of chunks whose symbol this chunk's content references. */
@@ -68,8 +105,12 @@ export function buildSymbolGraph(chunks: Chunk[]): SymbolGraph {
 }
 
 export interface ExpandedHit extends RerankedHit {
-  /** 'rerank' = a real result; 'caller'/'callee' = pulled in via the symbol graph, not scored. */
-  via: 'rerank' | 'caller' | 'callee';
+  /**
+   * 'rerank' = a real result; 'caller'/'callee' = pulled in via the symbol
+   * graph, not scored; 'manifest' = a dependency-manifest file, guaranteed in
+   * for a 'manifest'-intent question regardless of how it would've scored.
+   */
+  via: 'rerank' | 'caller' | 'callee' | 'manifest';
 }
 
 export interface ExpandOptions {
@@ -77,12 +118,14 @@ export interface ExpandOptions {
   maxPerHit?: number;
   /** Overall cap on graph-expanded additions (reranked hits are never capped). */
   maxTotal?: number;
+  /** When 'manifest', every dependency-manifest chunk found is added — see MANIFEST_FILENAMES. */
+  intent?: QueryIntent;
 }
 
 const DEFAULT_MAX_PER_HIT = 3;
 const DEFAULT_MAX_TOTAL = 10;
 
-function toExpandedHit(chunk: Chunk, via: 'caller' | 'callee'): ExpandedHit {
+function toExpandedHit(chunk: Chunk, via: 'caller' | 'callee' | 'manifest'): ExpandedHit {
   return {
     id: chunk.id,
     filePath: chunk.filePath,
@@ -102,7 +145,12 @@ function toExpandedHit(chunk: Chunk, via: 'caller' | 'callee'): ExpandedHit {
  * Add each reranked hit's likely callers and callees, deduped against what's
  * already present (a hit already in the reranked list never gets re-added as
  * "expanded"), capped per-hit and overall so one heavily-referenced symbol
- * can't flood the context.
+ * can't flood the context. When `opts.intent === 'manifest'`, also adds every
+ * dependency-manifest chunk found in the repo (uncapped — there are normally
+ * only one or two, e.g. `go.mod`), since a manifest question has nothing to
+ * do with the call graph and would otherwise never surface these files at all
+ * (see this file's own doc comment on why Retrieve/Rerank alone can't be
+ * trusted to rank a manifest file highly for a casually-phrased question).
  */
 export function expandResults(
   allChunks: Chunk[],
@@ -117,6 +165,16 @@ export function expandResults(
 
   const result: ExpandedHit[] = reranked.map((r) => ({ ...r, via: 'rerank' }));
   const seen = new Set(reranked.map((r) => r.id));
+
+  if (opts.intent === 'manifest') {
+    for (const chunk of allChunks) {
+      if (chunk.kind !== 'config' || !isManifestFilePath(chunk.filePath)) continue;
+      if (seen.has(chunk.id)) continue;
+      seen.add(chunk.id);
+      result.push(toExpandedHit(chunk, 'manifest'));
+    }
+  }
+
   let added = 0;
 
   outer: for (const hit of reranked) {

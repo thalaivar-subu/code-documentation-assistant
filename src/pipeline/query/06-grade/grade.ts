@@ -10,7 +10,7 @@
  */
 
 import type { RouteResult } from '../01-route/route.ts';
-import type { ExpandedHit } from '../05-expand/expand.ts';
+import { isManifestFilePath, type ExpandedHit } from '../05-expand/expand.ts';
 
 export interface GradeResult {
   sufficient: boolean;
@@ -28,11 +28,16 @@ const DEFAULT_MIN_RERANK_SCORE = 0.01;
 const DEFAULT_MAX_HOPS = 3;
 
 /**
- * Three checks, cheapest/most-decisive first:
+ * Four checks, cheapest/most-decisive first:
  *  1. Hop limit — a hard stop so the query loop can never run forever.
  *  2. Nothing found at all.
- *  3. Best rerank score too low to be confident in the top match.
- *  4. `trace` questions specifically need graph edges (Stage 5) — finding the
+ *  3. `manifest` questions are satisfied by finding a dependency-manifest file
+ *     at all (Expand adds these with `rerankScore: 0` by construction — a
+ *     manifest file's relevance comes from being the right *file*, not from
+ *     scoring well against a casually-phrased question, so the rerank-score
+ *     check below would be testing the wrong thing entirely for this intent).
+ *  4. Best rerank score too low to be confident in the top match.
+ *  5. `trace` questions specifically need graph edges (Stage 5) — finding the
  *     named function isn't enough if the question was about its callers.
  */
 export function gradeContext(
@@ -53,6 +58,21 @@ export function gradeContext(
 
   if (expanded.length === 0) {
     return { sufficient: false, reason: 'no candidates found at all' };
+  }
+
+  if (route.intent === 'manifest') {
+    // Checked by filename, not by `via` — a manifest file can reach `expanded`
+    // either guaranteed-injected (via: 'manifest') or as a genuine, well-
+    // scoring via: 'rerank' hit if it happened to rank well on its own; either
+    // way it's already in context and another hop would be wasted work.
+    const hasManifest = expanded.some((h) => isManifestFilePath(h.filePath));
+    return hasManifest
+      ? { sufficient: true, reason: "found the project's dependency manifest file(s)" }
+      : {
+          sufficient: false,
+          reason:
+            'manifest question, but no dependency-manifest file (go.mod, package.json, …) exists in this repo',
+        };
   }
 
   const rerankScores = expanded.filter((h) => h.via === 'rerank').map((h) => h.rerankScore);

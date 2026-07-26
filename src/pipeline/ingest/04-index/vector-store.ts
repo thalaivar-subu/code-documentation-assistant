@@ -137,6 +137,19 @@ export async function upsertVectors(db: lancedb.Connection, rows: VectorRow[]): 
   await tbl.mergeInsert('id').whenMatchedUpdateAll().whenNotMatchedInsertAll().execute(rows);
 }
 
+/**
+ * Removes every row for a repoId — used by tests that index a throwaway repo
+ * into the shared store (`server.test.ts` indexes "." for a network-free
+ * end-to-end run) so they don't leave permanent, real-looking entries behind
+ * for `/repos` to list to an actual user.
+ */
+export async function deleteVectorsByRepoId(db: lancedb.Connection, repoId: string): Promise<void> {
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE)) return;
+  const tbl = await db.openTable(TABLE);
+  await tbl.delete(repoIdFilter(repoId));
+}
+
 export async function countVectors(db: lancedb.Connection, repoId?: string): Promise<number> {
   const tableNames = await db.tableNames();
   if (!tableNames.includes(TABLE)) return 0;

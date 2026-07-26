@@ -72,6 +72,28 @@ describe('routeQuery — trace intent', () => {
   });
 });
 
+describe('routeQuery — manifest intent', () => {
+  it('detects a bare "dependencies" mention with no code symbol', () => {
+    const r = routeQuery('Give me the dependencies bro');
+    expect(r.intent).toBe('manifest');
+  });
+
+  it('detects "what packages"', () => {
+    const r = routeQuery('What packages does this project use?');
+    expect(r.intent).toBe('manifest');
+  });
+
+  it('detects an explicit manifest filename mention', () => {
+    const r = routeQuery("What's declared in package.json?");
+    expect(r.intent).toBe('manifest');
+  });
+
+  it('"dependencies of X" still routes to trace, not manifest (code-level tracing wins)', () => {
+    const r = routeQuery('What are the dependencies of the embed stage?');
+    expect(r.intent).toBe('trace');
+  });
+});
+
 describe('routeQuery — concept intent (fallback)', () => {
   it('classifies a general architecture question as concept', () => {
     const r = routeQuery('How does authentication work in this system?');
