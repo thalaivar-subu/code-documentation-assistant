@@ -205,16 +205,20 @@ indexing note for what that would take to add).
 
 ---
 
-## 6. Cost & observability — mostly planned, not built
+## 6. Cost & observability — cost is real, tracing isn't
 
-**What's real:** `docs/COST.md` exists and honestly labels itself a placeholder — it's
-meant to be generated from Claude Code's own session transcripts (which already carry
-per-turn token usage), but the `cost-report` skill that would generate it hasn't been
-written yet.
+**What's real:** `docs/COST.md` is generated — `npm run cost:report`
+(`src/scripts/cost-report.ts`) reads this machine's real Claude Code session
+transcripts (which already carry per-turn token usage) and aggregates them, filtering
+to sessions that substantially reference this project rather than hand-picking session
+ids. It's a machine-local tool (the transcripts live outside this repo, at
+`~/.claude/projects/`), so it only reports something on the machine that actually built
+the project — but the numbers in `COST.md` right now are real, not placeholder text.
 
 **What's not built:** there is no runtime tracing (no `.cache/traces/*.jsonl`, no span
-written per stage) and no eval harness — `eval/` is an empty directory with only a
-`.gitkeep`; the golden question set and the recall@k/MRR/nDCG/citation-resolution scripts
-described in the original plan don't exist. Each stage's own README instead documents
+written per stage) and no eval harness — the placeholder `eval/` directory (empty except
+for a `.gitkeep`) was removed rather than left as a stale stub; the golden question set
+and the recall@k/MRR/nDCG/citation-resolution scripts described in the original plan
+don't exist. Each stage's own README instead documents
 correctness with real, captured example runs against the standard test repo — a weaker
 substitute for a real eval suite, but real rather than aspirational.

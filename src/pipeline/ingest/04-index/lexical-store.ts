@@ -13,11 +13,13 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import MiniSearch from 'minisearch';
 
 import type { Chunk } from '../../../core/types.ts';
+import { createAsyncCache } from '../../../core/async-cache.ts';
 
 export const DEFAULT_INDEX_DIR = '.cache/index/lexical';
 
@@ -95,18 +97,30 @@ export async function findLeastRecentlyIndexedRepoId(
 }
 
 export async function loadLexicalIndex(path: string): Promise<MiniSearch<LexicalDoc>> {
+  let raw: string;
   try {
-    const raw = await readFile(path, 'utf8');
-    return MiniSearch.loadJSON<LexicalDoc>(raw, MINISEARCH_OPTIONS);
+    raw = await readFile(path, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return new MiniSearch<LexicalDoc>(MINISEARCH_OPTIONS);
     }
     throw err;
   }
+
+  try {
+    return MiniSearch.loadJSON<LexicalDoc>(raw, MINISEARCH_OPTIONS);
+  } catch {
+    // A corrupt/malformed file (e.g. a crash mid-write, before the atomic
+    // prepareLexicalSave/commit split this stage now uses) degrades to an
+    // empty index instead of throwing on every subsequent query against this
+    // repo — lexical search just returns nothing for it until the next
+    // `indexRepo` call rebuilds a valid file from the real chunks. Vector
+    // search is unaffected either way.
+    return new MiniSearch<LexicalDoc>(MINISEARCH_OPTIONS);
+  }
 }
 
-const lexicalCache = new Map<string, Promise<MiniSearch<LexicalDoc>>>();
+const lexicalCache = createAsyncCache<string, MiniSearch<LexicalDoc>>();
 
 /**
  * Read-path callers (Retrieve) call this instead of `loadLexicalIndex` — every
@@ -117,19 +131,11 @@ const lexicalCache = new Map<string, Promise<MiniSearch<LexicalDoc>>>();
  * against that repo reloads the updated file instead of serving a stale copy.
  */
 export function getCachedLexicalIndex(path: string): Promise<MiniSearch<LexicalDoc>> {
-  let cached = lexicalCache.get(path);
-  if (!cached) {
-    cached = loadLexicalIndex(path).catch((err: unknown) => {
-      lexicalCache.delete(path);
-      throw err;
-    });
-    lexicalCache.set(path, cached);
-  }
-  return cached;
+  return lexicalCache.getOrCreate(path, () => loadLexicalIndex(path));
 }
 
 export function invalidateCachedLexicalIndex(path: string): void {
-  lexicalCache.delete(path);
+  lexicalCache.invalidate(path);
 }
 
 /** Removes a repo's lexical index file — see `deleteVectorsByRepoId`'s doc comment for why. */
@@ -138,9 +144,35 @@ export async function deleteLexicalIndexFile(path: string): Promise<void> {
   await rm(path, { force: true });
 }
 
-export async function saveLexicalIndex(path: string, index: MiniSearch<LexicalDoc>): Promise<void> {
+export interface PendingLexicalSave {
+  /** Atomically makes the write visible at `path` — a same-volume `rename` can't leave a half-written file. */
+  commit(): Promise<void>;
+}
+
+/**
+ * Serializes `index` to a temp file NOW, but doesn't make it visible at
+ * `path` until `commit()` renames it into place. Splitting write-from-commit
+ * (rather than one `saveLexicalIndex` call) is what lets `index.ts`'s
+ * `indexRepo` upsert vectors in between: the lexical file only becomes real
+ * (and only then does `listIndexedRepoIds` — and therefore `/repos` — see this
+ * repo as indexed) after the vector store write has already succeeded. A
+ * crash after the temp write but before `commit()` just abandons an orphaned
+ * `.tmp-*` file; it never corrupts or half-writes the real path.
+ */
+export async function prepareLexicalSave(
+  path: string,
+  index: MiniSearch<LexicalDoc>,
+): Promise<PendingLexicalSave> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(index), 'utf8');
+  const tmpPath = `${path}.tmp-${randomUUID()}`;
+  await writeFile(tmpPath, JSON.stringify(index), 'utf8');
+  return { commit: () => rename(tmpPath, path) };
+}
+
+/** Convenience for callers that don't need to interleave other work between write and commit. */
+export async function saveLexicalIndex(path: string, index: MiniSearch<LexicalDoc>): Promise<void> {
+  const pending = await prepareLexicalSave(path, index);
+  await pending.commit();
 }
 
 /**

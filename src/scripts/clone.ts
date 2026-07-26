@@ -15,16 +15,13 @@
  */
 
 import { cloneRepo } from '../pipeline/ingest/01-clone/clone.ts';
+import { parseCliArgs, usageError } from './_shared/cli.ts';
 
 function parseArgs(argv: string[]): { input: string; fresh: boolean } {
-  const args = argv.slice(2);
-  const fresh = args.includes('--fresh');
-  const input = args.find((a) => !a.startsWith('--'));
-  if (!input) {
-    console.error('Usage: npm run clone -- <repo-url-or-local-path> [--fresh]');
-    process.exit(1);
-  }
-  return { input, fresh };
+  const args = parseCliArgs(argv);
+  const [input] = args.positional;
+  if (!input) usageError('npm run clone -- <repo-url-or-local-path> [--fresh]');
+  return { input, fresh: args.hasFlag('--fresh') };
 }
 
 async function main(): Promise<void> {

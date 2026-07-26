@@ -1,7 +1,7 @@
 # Example questions — real runs, across intents and failure modes
 
 > Every answer below is a real, unedited run (`npm run ask -- <repo> "<question>" --max-tokens
-> 200`) against the standard test repo
+200`) against the standard test repo
 > ([thalaivar-subu/telemetry-go](https://github.com/thalaivar-subu/telemetry-go)), captured while
 > writing this doc. Nothing here is hand-typed. The point isn't to show a highlight reel — three of
 > the eight questions below are real failure modes, kept in on purpose. See
@@ -17,13 +17,13 @@ parsing), not the model's wording.
 
 ## Clean successes, one per intent
 
-| # | Question | Intent | Hops | Citations | Verdict |
-| - | -------- | ------ | ---- | --------- | ------- |
-| 1 | "What does RecordTaskDuration do?" | `symbol` | 1 | 0/0 | Correct, grounded |
-| 2 | "Who calls RecordTaskDuration?" | `trace` | 1 | 0/0 | Correct, grounded |
-| 3 | "How is telemetry initialized in this project?" | `concept` | 1 | 0/0 | Correct, grounded |
-| 4 | "Give me the dependencies bro" | `manifest` | 1 | 0/0 | Correct, grounded |
-| 5 | "who triggers newPropagator internally?" | `symbol` | **2** | 0/0 | Correct, real 2-hop loop |
+| #   | Question                                        | Intent     | Hops  | Citations | Verdict                  |
+| --- | ----------------------------------------------- | ---------- | ----- | --------- | ------------------------ |
+| 1   | "What does RecordTaskDuration do?"              | `symbol`   | 1     | 0/0       | Correct, grounded        |
+| 2   | "Who calls RecordTaskDuration?"                 | `trace`    | 1     | 0/0       | Correct, grounded        |
+| 3   | "How is telemetry initialized in this project?" | `concept`  | 1     | 0/0       | Correct, grounded        |
+| 4   | "Give me the dependencies bro"                  | `manifest` | 1     | 0/0       | Correct, grounded        |
+| 5   | "who triggers newPropagator internally?"        | `symbol`   | **2** | 0/0       | Correct, real 2-hop loop |
 
 ### 1. Symbol — "What does RecordTaskDuration do?"
 

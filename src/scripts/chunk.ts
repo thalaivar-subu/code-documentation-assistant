@@ -31,27 +31,27 @@ import { cpus } from 'node:os';
 import { cloneRepo } from '../pipeline/ingest/01-clone/clone.ts';
 import { chunkRepo } from '../pipeline/ingest/02-chunk/chunk.ts';
 import { poolSize } from '../pipeline/ingest/02-chunk/chunk-pool.ts';
+import { parseCliArgs, usageError } from './_shared/cli.ts';
 
 function parseArgs(argv: string[]) {
-  const a = argv.slice(2);
-  const flagValue = (name: string) => (a.includes(name) ? a[a.indexOf(name) + 1] : undefined);
-
-  const input = a.find((x) => !x.startsWith('--') && !a[a.indexOf(x) - 1]?.startsWith('--'));
-  const sample = Number(flagValue('--sample') ?? 12);
-  const file = flagValue('--file');
-  const symbol = flagValue('--symbol');
-  const out = flagValue('--out');
-  const content = a.includes('--content');
-  const json = a.includes('--json');
-  const sequential = a.includes('--sequential');
+  const args = parseCliArgs(argv, ['--sample', '--file', '--symbol', '--out']);
+  const [input] = args.positional;
 
   if (!input) {
-    console.error(
-      'Usage: npm run chunk -- <repo-url-or-local-path> [--sample N] [--file <substr>] [--symbol <substr>] [--content] [--json] [--out <path>] [--sequential]',
+    usageError(
+      'npm run chunk -- <repo-url-or-local-path> [--sample N] [--file <substr>] [--symbol <substr>] [--content] [--json] [--out <path>] [--sequential]',
     );
-    process.exit(1);
   }
-  return { input, sample, file, symbol, content, json, out, sequential };
+  return {
+    input,
+    sample: Number(args.getFlag('--sample') ?? 12),
+    file: args.getFlag('--file'),
+    symbol: args.getFlag('--symbol'),
+    out: args.getFlag('--out'),
+    content: args.hasFlag('--content'),
+    json: args.hasFlag('--json'),
+    sequential: args.hasFlag('--sequential'),
+  };
 }
 
 async function main(): Promise<void> {

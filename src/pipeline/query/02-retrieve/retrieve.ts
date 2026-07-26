@@ -28,6 +28,15 @@ export interface RetrieveOptions {
   lexicalDir?: string;
   /** Swap the embedding function — tests inject a fake to skip loading the real model. */
   embedFn?: (texts: string[]) => Promise<number[][]>;
+  /**
+   * Swap the vector-store search — the same DIP seam `embedFn` already gives
+   * the embedder, extended to the stores themselves (see docs/DECISIONS.md's
+   * managed-swap notes: a Qdrant adapter is the one piece of new code a real
+   * deployment needs — this is where it plugs in for the read path).
+   */
+  searchVectorsFn?: typeof searchVectors;
+  /** Swap the lexical-store search — same reasoning as `searchVectorsFn`. */
+  searchLexicalFn?: typeof searchLexical;
 }
 
 export interface RetrieveResult {
@@ -58,6 +67,8 @@ export async function retrieveCandidates(
   const started = Date.now();
   const k = opts.k ?? DEFAULT_K;
   const embedFn = opts.embedFn ?? embedBatch;
+  const searchVectorsFn = opts.searchVectorsFn ?? searchVectors;
+  const searchLexicalFn = opts.searchLexicalFn ?? searchLexical;
 
   const [db, lexIndex, [queryVector]] = await Promise.all([
     getSharedVectorStore(opts.dbPath),
@@ -65,12 +76,12 @@ export async function retrieveCandidates(
     embedFn([question]),
   ]);
 
-  const vector = await searchVectors(db, queryVector, { k, repoId });
+  const vector = await searchVectorsFn(db, queryVector, { k, repoId });
 
-  const questionHits = searchLexical(lexIndex, question, { k, repoId });
+  const questionHits = searchLexicalFn(lexIndex, question, { k, repoId });
   const tokenHints = [...route.symbols, ...route.files];
   const tokenHits =
-    tokenHints.length > 0 ? searchLexical(lexIndex, tokenHints.join(' '), { k, repoId }) : [];
+    tokenHints.length > 0 ? searchLexicalFn(lexIndex, tokenHints.join(' '), { k, repoId }) : [];
   const lexical = mergeLexicalHits(questionHits, tokenHits, k);
 
   return { vector, lexical, ms: Date.now() - started };

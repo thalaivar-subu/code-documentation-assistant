@@ -15,6 +15,7 @@
 import * as lancedb from '@lancedb/lancedb';
 
 import type { Chunk } from '../../../core/types.ts';
+import { createAsyncCache } from '../../../core/async-cache.ts';
 import type { EmbeddedChunk } from '../03-embed/embed.ts';
 
 export const DEFAULT_DB_PATH = '.cache/index/lancedb';
@@ -96,7 +97,20 @@ export function openVectorStore(dbPath: string = DEFAULT_DB_PATH): Promise<lance
   return lancedb.connect(dbPath);
 }
 
-const connectionCache = new Map<string, Promise<lancedb.Connection>>();
+/**
+ * Every read/write path below used to repeat `db.tableNames()` then
+ * `db.openTable(TABLE)` — two round-trips before doing any real work, six
+ * times over. Returns `undefined` when the table doesn't exist yet (a repo
+ * that's never been indexed), which every caller already treated as "empty
+ * result" — this just gives that check one place to live.
+ */
+async function openChunksTable(db: lancedb.Connection): Promise<lancedb.Table | undefined> {
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE)) return undefined;
+  return db.openTable(TABLE);
+}
+
+const connectionCache = createAsyncCache<string, lancedb.Connection>();
 
 /**
  * Read-path callers (Retrieve, Rerank) call this instead of `openVectorStore` —
@@ -105,20 +119,12 @@ const connectionCache = new Map<string, Promise<lancedb.Connection>>();
  * they see current data regardless of when the connection was made). Write
  * callers (`indexRepo`) still use `openVectorStore` directly, unaffected.
  * A failed connect is never cached — the next call retries instead of
- * repeating the same rejection forever.
+ * repeating the same rejection forever (see `createAsyncCache`).
  */
 export function getSharedVectorStore(
   dbPath: string = DEFAULT_DB_PATH,
 ): Promise<lancedb.Connection> {
-  let cached = connectionCache.get(dbPath);
-  if (!cached) {
-    cached = openVectorStore(dbPath).catch((err: unknown) => {
-      connectionCache.delete(dbPath);
-      throw err;
-    });
-    connectionCache.set(dbPath, cached);
-  }
-  return cached;
+  return connectionCache.getOrCreate(dbPath, () => openVectorStore(dbPath));
 }
 
 /**
@@ -128,12 +134,11 @@ export function getSharedVectorStore(
  */
 export async function upsertVectors(db: lancedb.Connection, rows: VectorRow[]): Promise<void> {
   if (rows.length === 0) return;
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE)) {
+  const tbl = await openChunksTable(db);
+  if (!tbl) {
     await db.createTable(TABLE, rows);
     return;
   }
-  const tbl = await db.openTable(TABLE);
   await tbl.mergeInsert('id').whenMatchedUpdateAll().whenNotMatchedInsertAll().execute(rows);
 }
 
@@ -144,18 +149,35 @@ export async function upsertVectors(db: lancedb.Connection, rows: VectorRow[]): 
  * for `/repos` to list to an actual user.
  */
 export async function deleteVectorsByRepoId(db: lancedb.Connection, repoId: string): Promise<void> {
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE)) return;
-  const tbl = await db.openTable(TABLE);
+  const tbl = await openChunksTable(db);
+  if (!tbl) return;
   await tbl.delete(repoIdFilter(repoId));
 }
 
 export async function countVectors(db: lancedb.Connection, repoId?: string): Promise<number> {
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE)) return 0;
-  const tbl = await db.openTable(TABLE);
+  const tbl = await openChunksTable(db);
+  if (!tbl) return 0;
   if (!repoId) return tbl.countRows();
   return tbl.countRows(repoIdFilter(repoId));
+}
+
+/**
+ * Counts every indexed repo's rows in ONE scan — `select(['repoId'])` pulls just
+ * that column (not full chunk content/vectors), then groups client-side. `/repos`
+ * used to call `countVectors` once per repoId (a `tableNames()` + `openTable()` +
+ * `countRows()` round trip each — 3×N calls for N repos, and growing with every
+ * repo indexed); this is the same information in one table scan regardless of N.
+ */
+export async function countVectorsByRepo(db: lancedb.Connection): Promise<Map<string, number>> {
+  const tbl = await openChunksTable(db);
+  if (!tbl) return new Map();
+  const rows = await tbl.query().select(['repoId']).toArray();
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const repoId = row.repoId as string;
+    counts.set(repoId, (counts.get(repoId) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export interface VectorHit {
@@ -176,9 +198,8 @@ export async function searchVectors(
   queryVector: number[],
   opts: { k?: number; repoId?: string } = {},
 ): Promise<VectorHit[]> {
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE)) return [];
-  const tbl = await db.openTable(TABLE);
+  const tbl = await openChunksTable(db);
+  if (!tbl) return [];
   let query = tbl.search(queryVector).limit(opts.k ?? 10);
   if (opts.repoId) query = query.where(repoIdFilter(opts.repoId));
   const rows = await query.toArray();
@@ -210,9 +231,8 @@ export async function listVectors(
   // have swapped one falsy-zero-shaped bug for another, harder-to-spot one.
   if (opts.limit === 0) return [];
 
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE)) return [];
-  const tbl = await db.openTable(TABLE);
+  const tbl = await openChunksTable(db);
+  if (!tbl) return [];
   let query = tbl.query();
   if (opts.repoId) query = query.where(repoIdFilter(opts.repoId));
   if (opts.limit !== undefined) query = query.limit(opts.limit);
@@ -232,9 +252,8 @@ export async function getVectorsByIds(
   ids: string[],
 ): Promise<VectorRow[]> {
   if (ids.length === 0) return [];
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE)) return [];
-  const tbl = await db.openTable(TABLE);
+  const tbl = await openChunksTable(db);
+  if (!tbl) return [];
   const rows = await tbl
     .query()
     .where(`${repoIdFilter(repoId)} AND id IN (${ids.map(idFilterValue).join(', ')})`)

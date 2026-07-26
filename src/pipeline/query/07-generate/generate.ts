@@ -22,18 +22,47 @@ function truncateContent(content: string): string {
 }
 
 /**
+ * The per-chunk cap above bounds one oversized chunk; nothing previously
+ * bounded the SUM — `/ask`'s `limit`/`k` options are caller-controlled, so
+ * asking for a larger shortlist than usual could silently build a prompt
+ * past the model's context window. Chunks arrive ordered by relevance
+ * (Expand puts reranked hits first, graph/manifest additions after — see
+ * expand.ts), so this keeps the front of that order and drops from the tail,
+ * the same "cheapest signal, already computed" reasoning Rerank's
+ * `maxCandidates` uses.
+ */
+const MAX_TOTAL_CONTEXT_CHARS = 12_000;
+
+function boundContext(context: ExpandedHit[]): { included: ExpandedHit[]; droppedCount: number } {
+  const included: ExpandedHit[] = [];
+  let used = 0;
+  for (const c of context) {
+    const size = Math.min(c.content.length, MAX_CHUNK_CONTENT_CHARS);
+    if (included.length > 0 && used + size > MAX_TOTAL_CONTEXT_CHARS) break;
+    included.push(c);
+    used += size;
+  }
+  return { included, droppedCount: context.length - included.length };
+}
+
+/**
  * Every claim must cite `file:line` or `file:line-line` — enforced by the
  * prompt, checked for real by Stage 8 (Verify, not built yet), which
  * resolves each citation against the actual index instead of trusting the
  * model said something plausible-looking.
  */
 export function buildPrompt(question: string, context: ExpandedHit[]): string {
-  const contextBlock = context
+  const { included, droppedCount } = boundContext(context);
+  const contextBlock = included
     .map(
       (c) =>
         `### ${c.filePath}:${c.startLine}-${c.endLine} (${c.symbolName})\n\`\`\`\n${truncateContent(c.content)}\n\`\`\``,
     )
     .join('\n\n');
+  const droppedNote =
+    droppedCount > 0
+      ? `\n\n(${droppedCount} additional, lower-relevance context chunk(s) omitted to stay within the prompt budget.)`
+      : '';
 
   return [
     'You are a code documentation assistant. Answer the question using ONLY the code context',
@@ -45,7 +74,7 @@ export function buildPrompt(question: string, context: ExpandedHit[]): string {
     question,
     '',
     '## Context',
-    contextBlock || '(no context was retrieved)',
+    (contextBlock || '(no context was retrieved)') + droppedNote,
     '',
     '## Answer (remember: cite file:line for every claim, using the file:line shown in each ### heading above)',
   ].join('\n');

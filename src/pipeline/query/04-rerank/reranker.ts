@@ -24,6 +24,18 @@ import {
 
 export const RERANK_MODEL = 'Xenova/bge-reranker-base';
 
+/**
+ * Token budget per (query, doc) pair. MEASURED (not guessed) on a real 34-candidate
+ * batch, avg doc 1,275 chars but max 5,131: unpadded/untruncated (model max, 512)
+ * took 9,732ms; capping to 256 took 4,397ms (2.2x) — see docs/REFACTOR-PLAN.md and
+ * this stage's own README for the full measured table, including the quality
+ * check against real questions before this was picked. `padding: true` alone (no
+ * max_length) pads every pair in the batch to the LONGEST pair, so one oversized
+ * chunk inflates every other pair's cost too — that's the actual bug, not just
+ * "512 is slow".
+ */
+export const RERANK_MAX_TOKENS = 256;
+
 env.cacheDir = '.cache/models';
 
 let tokenizerPromise: Promise<PreTrainedTokenizer> | undefined;
@@ -54,7 +66,12 @@ export async function scorePairs(query: string, docs: string[]): Promise<number[
   if (docs.length === 0) return [];
   const [tokenizer, model] = await Promise.all([getTokenizer(), getModel()]);
   const queries = docs.map(() => query);
-  const inputs = await tokenizer(queries, { text_pair: docs, padding: true, truncation: true });
+  const inputs = await tokenizer(queries, {
+    text_pair: docs,
+    padding: 'max_length',
+    truncation: true,
+    max_length: RERANK_MAX_TOKENS,
+  });
   const { logits } = await model(inputs);
   return Array.from(logits.data as Float32Array, (logit) => 1 / (1 + Math.exp(-logit)));
 }

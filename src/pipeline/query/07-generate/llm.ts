@@ -60,12 +60,41 @@ export interface GenerateOptions {
   maxTokens?: number;
   /** Called with each streamed text chunk as it's generated, if you want live output. */
   onToken?: (chunk: string) => void;
+  /**
+   * `session.prompt()` supports this natively — when it fires mid-generation,
+   * the call stops and throws instead of running the remaining ~15-20s for a
+   * client that already disconnected. Checked again just before starting (see
+   * `runGeneration`), since this call may have been queued for a while behind
+   * another in-flight generation by the time its turn comes.
+   */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_MAX_TOKENS = 512;
 
+/**
+ * Serializes every `generateAnswer` call behind a single slot — this machine's
+ * iGPU has modest VRAM (see this file's module doc), and `model.createContext()`
+ * had no limit on how many could exist at once. Two concurrent `/ask` requests
+ * used to open two concurrent contexts on the same small GPU rather than one
+ * queuing behind the other. A promise-chain queue: each call waits for the
+ * previous one to settle (success or failure) before its own turn starts.
+ */
+let generationQueue: Promise<unknown> = Promise.resolve();
+
 /** Run one prompt through the model and return the full text (streamed via onToken as it goes). */
-export async function generateAnswer(prompt: string, opts: GenerateOptions = {}): Promise<string> {
+export function generateAnswer(prompt: string, opts: GenerateOptions = {}): Promise<string> {
+  const turn = generationQueue.then(() => runGeneration(prompt, opts));
+  generationQueue = turn.then(
+    () => undefined,
+    () => undefined,
+  );
+  return turn;
+}
+
+async function runGeneration(prompt: string, opts: GenerateOptions): Promise<string> {
+  if (opts.signal?.aborted) throw new Error('aborted: client disconnected');
+
   const model = await getModel();
   const context = await model.createContext();
   try {
@@ -73,6 +102,7 @@ export async function generateAnswer(prompt: string, opts: GenerateOptions = {})
     return await session.prompt(prompt, {
       maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       onTextChunk: opts.onToken,
+      signal: opts.signal,
     });
   } finally {
     await context.dispose();

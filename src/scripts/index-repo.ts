@@ -24,18 +24,14 @@ import { cloneRepo } from '../pipeline/ingest/01-clone/clone.ts';
 import { chunkRepo } from '../pipeline/ingest/02-chunk/chunk.ts';
 import { embedChunks } from '../pipeline/ingest/03-embed/embed.ts';
 import { indexRepo, peekIndex } from '../pipeline/ingest/04-index/index.ts';
+import { parseCliArgs, usageError } from './_shared/cli.ts';
 
 function parseArgs(argv: string[]) {
-  const a = argv.slice(2);
-  const flagValue = (name: string) => (a.includes(name) ? a[a.indexOf(name) + 1] : undefined);
-  const input = a.find((x) => !x.startsWith('--') && !a[a.indexOf(x) - 1]?.startsWith('--'));
-  const dump = Number(flagValue('--dump') ?? 0);
+  const args = parseCliArgs(argv, ['--dump']);
+  const [input] = args.positional;
 
-  if (!input) {
-    console.error('Usage: npm run index -- <repo-url-or-local-path> [--dump N]');
-    process.exit(1);
-  }
-  return { input, dump };
+  if (!input) usageError('npm run index -- <repo-url-or-local-path> [--dump N]');
+  return { input, dump: Number(args.getFlag('--dump') ?? 0) };
 }
 
 async function main(): Promise<void> {
@@ -43,6 +39,11 @@ async function main(): Promise<void> {
 
   console.log('\n── Ingest · Stage 4: Index ─────────────────────────────────────');
 
+  // Not using _shared/ingest.ts's ingestRepo() here on purpose — this script's
+  // whole job is showing each stage's OWN numbers (chunk count, embed dims,
+  // then the final chunksIndexed/vectorCount/lexicalCount/ms), which the
+  // shared helper's single terse log line would collapse away. Same reasoning
+  // as clone.ts/chunk.ts/embed.ts not using it either.
   const clone = await cloneRepo(input, { onStep: (m) => console.log(`  clone → ${m}`) });
   const { chunks } = await chunkRepo(clone);
   console.log(`  chunked ${chunks.length} chunks`);

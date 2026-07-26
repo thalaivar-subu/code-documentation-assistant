@@ -15,7 +15,7 @@ import type { EmbeddedChunk } from '../03-embed/embed.ts';
 import {
   indexPath,
   loadLexicalIndex,
-  saveLexicalIndex,
+  prepareLexicalSave,
   toLexicalDoc,
   upsertLexical,
 } from './lexical-store.ts';
@@ -57,13 +57,22 @@ export async function indexRepo(
     return toVectorRow(c, embedding);
   });
 
-  const db = await openVectorStore(opts.dbPath);
-  await upsertVectors(db, vectorRows);
-
+  // Lexical is written to a TEMP file and vectors are upserted before the
+  // lexical write is committed (renamed into place) — not the other way
+  // around. `listIndexedRepoIds` (and therefore `/repos`) discovers repos by
+  // the lexical file's real name, so a crash between the two stores leaves
+  // either "neither store written yet" or "both written" as the only visible
+  // states — never "vectors exist but the repo doesn't appear indexed", which
+  // had no compensating action to recover from. See docs/REFACTOR-PLAN.md #10.
   const lexPath = indexPath(repoId, opts.lexicalDir);
   const lexIndex = await loadLexicalIndex(lexPath);
   upsertLexical(lexIndex, chunks.map(toLexicalDoc));
-  await saveLexicalIndex(lexPath, lexIndex);
+  const pendingLexicalSave = await prepareLexicalSave(lexPath, lexIndex);
+
+  const db = await openVectorStore(opts.dbPath);
+  await upsertVectors(db, vectorRows);
+
+  await pendingLexicalSave.commit();
 
   return {
     repoId,

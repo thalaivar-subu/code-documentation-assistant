@@ -24,20 +24,14 @@ import { cloneRepo } from '../pipeline/ingest/01-clone/clone.ts';
 import { chunkRepo } from '../pipeline/ingest/02-chunk/chunk.ts';
 import { embedChunks } from '../pipeline/ingest/03-embed/embed.ts';
 import { EMBED_MODEL } from '../pipeline/ingest/03-embed/embedder.ts';
+import { parseCliArgs, usageError } from './_shared/cli.ts';
 
 function parseArgs(argv: string[]) {
-  const a = argv.slice(2);
-  const flagValue = (name: string) => (a.includes(name) ? a[a.indexOf(name) + 1] : undefined);
+  const args = parseCliArgs(argv, ['--sample']);
+  const [input] = args.positional;
 
-  const input = a.find((x) => !x.startsWith('--') && !a[a.indexOf(x) - 1]?.startsWith('--'));
-  const sample = Number(flagValue('--sample') ?? 5);
-  const json = a.includes('--json');
-
-  if (!input) {
-    console.error('Usage: npm run embed -- <repo-url-or-local-path> [--sample N] [--json]');
-    process.exit(1);
-  }
-  return { input, sample, json };
+  if (!input) usageError('npm run embed -- <repo-url-or-local-path> [--sample N] [--json]');
+  return { input, sample: Number(args.getFlag('--sample') ?? 5), json: args.hasFlag('--json') };
 }
 
 async function main(): Promise<void> {

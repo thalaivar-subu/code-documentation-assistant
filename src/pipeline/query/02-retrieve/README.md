@@ -15,6 +15,12 @@ index — this stage used to reopen/re-read both on every hop of the grade loop,
 a multi-hop question. The lexical cache is busted by `index-stream.ts` right after a successful
 `/index`, so a re-index is never served stale.
 
+**The store search calls are injectable, same as `embedFn`.** `RetrieveOptions.searchVectorsFn`/
+`searchLexicalFn` default to the real `searchVectors`/`searchLexical`, but can be swapped — the same
+DIP seam this file already gave the embedder, extended to the stores themselves (see
+`docs/PRODUCTIONIZE.md`'s managed-swap notes: a Qdrant adapter for the vector store plugs in here
+without touching this stage's own logic).
+
 ## Where Route's output actually gets used
 
 Dense search always embeds the full question — an embedding model needs sentence context, handing it

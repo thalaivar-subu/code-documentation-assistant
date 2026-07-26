@@ -93,10 +93,11 @@ retrieval metrics myself (~100 lines, no LLM needed) ([ADR-0001](./DECISIONS.md)
 **Q: How do you know retrieval is any good?**
 Today, honestly, from real captured example runs per stage rather than a formal eval suite — the
 plan called for a golden set of ~40 labelled `question → {files}` pairs scored with recall@k /
-MRR / nDCG plus a dense/lexical/hybrid/+rerank ablation, and `eval/` exists as a directory for it,
-but it was never actually written (empty except a `.gitkeep`). That's the honest gap, and it's
-the first thing I'd build for real confidence beyond "I read the outputs and they look right"
-([ADR-0010](./DECISIONS.md) documents the intended design).
+MRR / nDCG plus a dense/lexical/hybrid/+rerank ablation. It was never actually written, and the
+placeholder `eval/` directory (empty except a `.gitkeep`) has since been removed rather than kept
+as a stale stub. That's the honest gap, and it's the first thing I'd build for real confidence
+beyond "I read the outputs and they look right" ([ADR-0010](./DECISIONS.md) documents the intended
+design).
 
 **Q: How do you prevent hallucinated citations?**
 The prompt requires a `file:line` per claim, then code **verifies** each cited location was

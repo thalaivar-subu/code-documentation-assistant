@@ -12,28 +12,26 @@
  *   npm run grade -- https://github.com/thalaivar-subu/telemetry-go "who calls RecordTaskDuration?"
  */
 
-import { cloneRepo } from '../pipeline/ingest/01-clone/clone.ts';
-import { chunkRepo } from '../pipeline/ingest/02-chunk/chunk.ts';
-import { embedChunks } from '../pipeline/ingest/03-embed/embed.ts';
-import { indexRepo } from '../pipeline/ingest/04-index/index.ts';
 import { runQueryLoop } from '../pipeline/query/06-grade/query-loop.ts';
+import { parseCliArgs, usageError } from './_shared/cli.ts';
+import { ingestRepo } from './_shared/ingest.ts';
 
 function parseArgs(argv: string[]) {
-  const a = argv.slice(2);
-  const flagValue = (name: string) => (a.includes(name) ? a[a.indexOf(name) + 1] : undefined);
-  const positional = a.filter((x, i) => !x.startsWith('--') && !a[i - 1]?.startsWith('--'));
-  const [input, question] = positional;
-  const maxHops = Number(flagValue('--max-hops') ?? 3);
-  const k = Number(flagValue('--k') ?? 20);
-  const limit = Number(flagValue('--limit') ?? 8);
+  const args = parseCliArgs(argv, ['--max-hops', '--k', '--limit']);
+  const [input, question] = args.positional;
 
   if (!input || !question) {
-    console.error(
-      'Usage: npm run grade -- <repo-url-or-local-path> "<question>" [--max-hops N] [--k N] [--limit N]',
+    usageError(
+      'npm run grade -- <repo-url-or-local-path> "<question>" [--max-hops N] [--k N] [--limit N]',
     );
-    process.exit(1);
   }
-  return { input, question, maxHops, k, limit };
+  return {
+    input,
+    question,
+    maxHops: Number(args.getFlag('--max-hops') ?? 3),
+    k: Number(args.getFlag('--k') ?? 20),
+    limit: Number(args.getFlag('--limit') ?? 8),
+  };
 }
 
 async function main(): Promise<void> {
@@ -41,11 +39,7 @@ async function main(): Promise<void> {
 
   console.log('\n── Query · Stage 6: Grade (+ query loop) ───────────────────────');
 
-  const clone = await cloneRepo(input, { onStep: (m) => console.log(`  clone → ${m}`) });
-  const { chunks } = await chunkRepo(clone);
-  const { embeddings } = await embedChunks(chunks);
-  await indexRepo(clone.repoId, chunks, embeddings);
-  console.log(`  indexed ${chunks.length} chunks from ${clone.repoId}`);
+  const { clone, chunks } = await ingestRepo(input);
 
   const result = await runQueryLoop(clone.repoId, question, chunks, { maxHops, k, limit });
 

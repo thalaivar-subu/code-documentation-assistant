@@ -17,13 +17,34 @@ import { runIndexStream } from './index-stream.ts';
 import { getOrReconstructChunks } from './repo-cache.ts';
 import { listIndexedRepoIds } from '../pipeline/ingest/04-index/lexical-store.ts';
 import { ALL_STAGES } from '../pipeline/stages.manifest.ts';
-import { countVectors, getSharedVectorStore } from '../pipeline/ingest/04-index/vector-store.ts';
+import {
+  countVectorsByRepo,
+  getSharedVectorStore,
+} from '../pipeline/ingest/04-index/vector-store.ts';
 import { openSse } from './sse.ts';
+import { AppError, NotIndexedError } from '../core/errors.ts';
 
 export function buildServer() {
   const app = Fastify({ logger: false });
 
   app.register(cors, { origin: true });
+
+  // Without this, a throw before openSse() (e.g. a bug in a route handler
+  // itself) falls through to Fastify's default 500 handler, which doesn't
+  // carry the { code, message } shape the rest of this API uses. Covers
+  // request handlers this file defines; the SSE streams' own errors are
+  // already caught and emitted as SSE 'error' events by
+  // runIndexStream/runAskStream, never reaching here. Fastify's OWN schema
+  // validation failures also arrive here (as a non-AppError with its own
+  // `statusCode`, already 400) — respected rather than collapsed to 500.
+  app.setErrorHandler((err, _request, reply) => {
+    if (err instanceof AppError) {
+      reply.code(400).send({ code: err.code, message: err.message });
+      return;
+    }
+    const status = 'statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 500;
+    reply.code(status).send({ code: 'INTERNAL_ERROR', message: err.message });
+  });
 
   app.get('/health', async () => ({ ok: true }));
 
@@ -34,12 +55,10 @@ export function buildServer() {
   app.get('/repos', async () => {
     const repoIds = await listIndexedRepoIds();
     const db = await getSharedVectorStore();
-    return Promise.all(
-      repoIds.map(async (repoId) => ({
-        repoId,
-        chunksIndexed: await countVectors(db, repoId),
-      })),
-    );
+    // One scan for every repo's count, not one countRows() call per repo —
+    // see countVectorsByRepo's doc comment.
+    const counts = await countVectorsByRepo(db);
+    return repoIds.map((repoId) => ({ repoId, chunksIndexed: counts.get(repoId) ?? 0 }));
   });
 
   app.post<{ Body: { repo: string; fresh?: boolean } }>(
@@ -92,12 +111,20 @@ export function buildServer() {
       const { repoId, question, maxHops, k, limit, maxTokens } = request.body;
       const chunks = await getOrReconstructChunks(repoId);
       if (!chunks) {
+        const err = new NotIndexedError(repoId);
         reply.code(404);
-        return { error: `repoId ${repoId} was never indexed — call /index first` };
+        return { code: err.code, message: err.message };
       }
 
       const sse = openSse(reply);
-      await runAskStream(repoId, question, chunks, { maxHops, k, limit, maxTokens }, sse.send);
+      await runAskStream(
+        repoId,
+        question,
+        chunks,
+        { maxHops, k, limit, maxTokens },
+        sse.send,
+        sse.signal,
+      );
       sse.close();
     },
   );

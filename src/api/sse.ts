@@ -1,8 +1,20 @@
 import type { FastifyReply } from 'fastify';
 
+/** What `runIndexStream`/`runAskStream` call to report progress — a transport-agnostic shape matching `SseWriter.send`, so the pipeline runners never import Fastify or know they're talking SSE at all. */
+export type EmitFn = (event: string, data: unknown) => void;
+
 export interface SseWriter {
-  send: (event: string, data: unknown) => void;
+  send: EmitFn;
   close: () => void;
+  /**
+   * Aborts when the client disconnects (closes the tab, navigates away) —
+   * `/ask` threads this down to the actual LLM call (`node-llama-cpp`'s
+   * `session.prompt()` accepts a `signal` natively) so a ~15-20s generation
+   * doesn't keep running for nobody. Not threaded into `/index`: that work
+   * populates a store every future request benefits from, so finishing it
+   * isn't wasted just because the caller who triggered it left.
+   */
+  signal: AbortSignal;
 }
 
 /**
@@ -26,7 +38,14 @@ export function openSse(reply: FastifyReply): SseWriter {
     'Access-Control-Allow-Origin': '*',
   });
 
+  // Fires on a real client disconnect AND on our own normal `close()` below —
+  // harmless in the latter case, since by then the pipeline's async work has
+  // already finished and nothing is still checking the signal.
+  const controller = new AbortController();
+  reply.raw.on('close', () => controller.abort());
+
   return {
+    signal: controller.signal,
     // Guarded: if the client already disconnected (closed tab mid-stream), the
     // underlying socket write throws — including on the error-reporting path
     // itself (index-stream.ts/ask-stream.ts's catch blocks call send('error', ...)),

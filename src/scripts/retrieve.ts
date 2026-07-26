@@ -14,25 +14,19 @@
  *   npm run retrieve -- https://github.com/thalaivar-subu/telemetry-go "how does gin instrumentation work?" --k 3
  */
 
-import { cloneRepo } from '../pipeline/ingest/01-clone/clone.ts';
-import { chunkRepo } from '../pipeline/ingest/02-chunk/chunk.ts';
-import { embedChunks } from '../pipeline/ingest/03-embed/embed.ts';
-import { indexRepo } from '../pipeline/ingest/04-index/index.ts';
 import { routeQuery } from '../pipeline/query/01-route/route.ts';
 import { retrieveCandidates } from '../pipeline/query/02-retrieve/retrieve.ts';
+import { parseCliArgs, usageError } from './_shared/cli.ts';
+import { ingestRepo } from './_shared/ingest.ts';
 
 function parseArgs(argv: string[]) {
-  const a = argv.slice(2);
-  const flagValue = (name: string) => (a.includes(name) ? a[a.indexOf(name) + 1] : undefined);
-  const positional = a.filter((x, i) => !x.startsWith('--') && !a[i - 1]?.startsWith('--'));
-  const [input, question] = positional;
-  const k = Number(flagValue('--k') ?? 8);
+  const args = parseCliArgs(argv, ['--k']);
+  const [input, question] = args.positional;
 
   if (!input || !question) {
-    console.error('Usage: npm run retrieve -- <repo-url-or-local-path> "<question>" [--k N]');
-    process.exit(1);
+    usageError('npm run retrieve -- <repo-url-or-local-path> "<question>" [--k N]');
   }
-  return { input, question, k };
+  return { input, question, k: Number(args.getFlag('--k') ?? 8) };
 }
 
 async function main(): Promise<void> {
@@ -40,11 +34,7 @@ async function main(): Promise<void> {
 
   console.log('\n── Query · Stage 2: Retrieve ───────────────────────────────────');
 
-  const clone = await cloneRepo(input, { onStep: (m) => console.log(`  clone → ${m}`) });
-  const { chunks } = await chunkRepo(clone);
-  const { embeddings } = await embedChunks(chunks);
-  await indexRepo(clone.repoId, chunks, embeddings);
-  console.log(`  indexed ${chunks.length} chunks from ${clone.repoId}`);
+  const { clone } = await ingestRepo(input);
 
   const route = routeQuery(question);
   console.log(`\n  question   "${question}"`);

@@ -49,15 +49,15 @@ tooling. Local artifacts live under `.cache/`.
 
 ## Locked decisions
 
-| Decision          | Choice                                                                                       | Rationale                                                                            |
-| ----------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Runtime           | Node.js + TypeScript                                                                         | Author comfort                                                                       |
-| Build order       | **Docs & architecture first**, then code                                                     | Docs become the spec; cheapest way to avoid rework                                   |
-| LLM               | **`node-llama-cpp` in-process** (GGUF, Vulkan/APU) is the default — zero services            | `openai-compatible` adapter is the managed swap: change `LLM_BASE_URL` + `LLM_MODEL` |
-| Chunker languages | **JS/TS, Python, Java**                                                                      | Proves generality without an unverifiable long tail                                  |
-| Study material    | **Single source** — `stages.manifest.ts` feeds the `/stages` API route and this doc's tables | Docs cannot drift from code                                                          |
-| Skills            | **`docs-sync`** and **`cost-report`** only                                                   | Deliberately minimal — `cost-report` was never actually written (see `docs/COST.md`) |
-| Interface         | Web UI only, streaming stage pipeline — **no CLI as a product feature**                      | Superseded an earlier draft that planned a `codedocs` CLI binary; see Naming above   |
+| Decision          | Choice                                                                                       | Rationale                                                                                                                                                                          |
+| ----------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime           | Node.js + TypeScript                                                                         | Author comfort                                                                                                                                                                     |
+| Build order       | **Docs & architecture first**, then code                                                     | Docs become the spec; cheapest way to avoid rework                                                                                                                                 |
+| LLM               | **`node-llama-cpp` in-process** (GGUF, Vulkan/APU) is the default — zero services            | `openai-compatible` adapter is the managed swap: change `LLM_BASE_URL` + `LLM_MODEL`                                                                                               |
+| Chunker languages | **JS/TS, Python, Java**                                                                      | Proves generality without an unverifiable long tail                                                                                                                                |
+| Study material    | **Single source** — `stages.manifest.ts` feeds the `/stages` API route and this doc's tables | Docs cannot drift from code                                                                                                                                                        |
+| Skills            | **`docs-sync`** and **`cost-report`** only                                                   | Deliberately minimal — `cost-report` shipped as a plain `npm run cost:report` dev script (`src/scripts/cost-report.ts`) rather than a formal Claude Code skill; see `docs/COST.md` |
+| Interface         | Web UI only, streaming stage pipeline — **no CLI as a product feature**                      | Superseded an earlier draft that planned a `codedocs` CLI binary; see Naming above                                                                                                 |
 
 ---
 
@@ -101,8 +101,9 @@ than silently:
   built** — every stage imports its concrete tool directly instead. See
   [ARCHITECTURE.md §4](./ARCHITECTURE.md#4-ports--adapters--planned-not-built) and
   [DECISIONS.md](./DECISIONS.md)'s drift note (`#0009`).
-- **Phase 4**'s golden set + `eval:retrieval` metrics were **never built** — `eval/` is
-  still empty. See [ARCHITECTURE.md §6](./ARCHITECTURE.md#6-cost--observability--mostly-planned-not-built).
+- **Phase 4**'s golden set + `eval:retrieval` metrics were **never built** — the placeholder
+  `eval/` directory sat empty and has since been removed. See
+  [ARCHITECTURE.md §6](./ARCHITECTURE.md#6-cost--observability--mostly-planned-not-built).
 - **Phase 5** used a hand-rolled hop loop instead of LangGraph — a deliberate call, not
   an oversight; see [DECISIONS #0006](./DECISIONS.md) and
   [INTERVIEW-QA.md](./INTERVIEW-QA.md)'s "why LangGraph" answer for the honest version.
@@ -118,11 +119,16 @@ than silently:
 
 ## Cost & trajectory tracking
 
-- **Build cost (Claude Code).** `cost-report` skill parses transcript JSONL → `docs/COST.md`:
-  per-prompt tokens, model, cumulative cost, cache-hit ratio. Raw dumps in `.cache/trajectory/`
-  (gitignored); the aggregate `COST.md` is committed as study material.
-- **Runtime cost (the app).** `gpt-tokenizer` counts tokens per stage; trace spans land in
-  `.cache/traces/*.jsonl`; the UI footer shows tokens + estimated cost per query.
+- **Build cost (Claude Code).** Built as planned, with two differences: it's a plain
+  `npm run cost:report` script rather than a formal skill, and it deliberately reports
+  raw token counts only, no dollar figure — this environment doesn't distinguish
+  metered API billing from subscription-plan usage, and getting that distinction wrong
+  would be worse than not reporting it. No `.cache/trajectory/` raw dumps; the script
+  re-derives everything from Claude Code's own transcripts on each run instead of
+  keeping a separate copy.
+- **Runtime cost (the app).** Not built — `gpt-tokenizer` per-stage counting, trace
+  spans in `.cache/traces/*.jsonl`, and a UI footer showing tokens + cost per query all
+  remain planned only (see [ARCHITECTURE.md §6](./ARCHITECTURE.md#6-cost--observability--cost-is-real-tracing-isnt)).
 
 ## MCPs — none needed
 

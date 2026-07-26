@@ -67,6 +67,30 @@ export interface SymbolGraph {
 }
 
 /**
+ * Keyed by the `chunks` array's own identity, not by repoId — `runQueryLoop`
+ * passes the SAME array reference across every hop of one question (and
+ * `repoChunks`/`getOrReconstructChunks` cache that same array across
+ * different questions against an already-loaded repo too), so this
+ * automatically invalidates the moment a re-index produces a new array.
+ * No repoId plumbing needed, and nothing to explicitly invalidate.
+ *
+ * MEASURED (not guessed): `buildSymbolGraph` costs 2.4ms at 282 chunks (0.8ms
+ * at 82) — this is NOT a performance fix, it's avoiding needless repeated work
+ * on the same input, which is worth doing while touching this file regardless
+ * of how small the saving is.
+ */
+const symbolGraphCache = new WeakMap<Chunk[], SymbolGraph>();
+
+function getOrBuildSymbolGraph(chunks: Chunk[]): SymbolGraph {
+  let graph = symbolGraphCache.get(chunks);
+  if (!graph) {
+    graph = buildSymbolGraph(chunks);
+    symbolGraphCache.set(chunks, graph);
+  }
+  return graph;
+}
+
+/**
  * One pass over every chunk's content, building both directions of the graph
  * at once (a caller edge is discovered exactly when its matching callee edge
  * is), rather than re-scanning per-hit later.
@@ -125,6 +149,18 @@ export interface ExpandOptions {
 const DEFAULT_MAX_PER_HIT = 3;
 const DEFAULT_MAX_TOTAL = 10;
 
+/** Round-robins between two lists up to `max` total items, so neither one alone can crowd out the other. */
+function interleave<T>(a: T[], b: T[], max: number): T[] {
+  const result: T[] = [];
+  let i = 0;
+  let j = 0;
+  while (result.length < max && (i < a.length || j < b.length)) {
+    if (i < a.length) result.push(a[i++]);
+    if (result.length < max && j < b.length) result.push(b[j++]);
+  }
+  return result;
+}
+
 function toExpandedHit(chunk: Chunk, via: 'caller' | 'callee' | 'manifest'): ExpandedHit {
   return {
     id: chunk.id,
@@ -160,7 +196,7 @@ export function expandResults(
   const maxPerHit = opts.maxPerHit ?? DEFAULT_MAX_PER_HIT;
   const maxTotal = opts.maxTotal ?? DEFAULT_MAX_TOTAL;
 
-  const graph = buildSymbolGraph(allChunks);
+  const graph = getOrBuildSymbolGraph(allChunks);
   const byId = new Map(allChunks.map((c) => [c.id, c]));
 
   const result: ExpandedHit[] = reranked.map((r) => ({ ...r, via: 'rerank' }));
@@ -178,10 +214,20 @@ export function expandResults(
   let added = 0;
 
   outer: for (const hit of reranked) {
-    const related: { id: string; via: 'caller' | 'callee' }[] = [
-      ...[...(graph.callers.get(hit.id) ?? [])].map((id) => ({ id, via: 'caller' as const })),
-      ...[...(graph.callees.get(hit.id) ?? [])].map((id) => ({ id, via: 'callee' as const })),
-    ].slice(0, maxPerHit);
+    const callers = [...(graph.callers.get(hit.id) ?? [])].map((id) => ({
+      id,
+      via: 'caller' as const,
+    }));
+    const callees = [...(graph.callees.get(hit.id) ?? [])].map((id) => ({
+      id,
+      via: 'callee' as const,
+    }));
+    // Alternate caller/callee rather than concatenating the two lists then
+    // slicing — concatenating meant a hit with >= maxPerHit callers crowded
+    // out every callee (regression: with 5 callers and the default
+    // maxPerHit: 3, zero callees were ever added, contradicting this
+    // function's own "callers AND callees" doc comment above).
+    const related = interleave(callers, callees, maxPerHit);
 
     for (const { id, via } of related) {
       if (seen.has(id)) continue;

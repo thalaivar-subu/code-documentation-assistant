@@ -14,6 +14,7 @@
  */
 
 import type { Chunk } from '../../../core/types.ts';
+import type { EmbeddedChunk } from '../../ingest/03-embed/embed.ts';
 import { indexRepo } from '../../ingest/04-index/index.ts';
 import { routeQuery, type RouteResult } from '../01-route/route.ts';
 import { retrieveCandidates } from '../02-retrieve/retrieve.ts';
@@ -45,6 +46,8 @@ export interface QueryLoopOptions {
   onRoute?: (route: RouteResult) => void;
   /** Fires after each hop's grade decision — the UI's hook for live progress. */
   onHop?: (hop: HopTrace) => void;
+  /** Checked between hops — a disconnected `/ask` client stops the loop before another hop's retrieve/rerank work, rather than finishing hops nobody will see. */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_MAX_HOPS = 3;
@@ -72,6 +75,7 @@ export async function runQueryLoop(
   let expanded: ExpandedHit[] = [];
 
   for (let hop = 0; hop < maxHops; hop++) {
+    if (opts.signal?.aborted) throw new Error('aborted: client disconnected');
     const { vector, lexical } = await retrieveCandidates(repoId, query, route, {
       k: opts.k,
       dbPath: opts.dbPath,
@@ -104,7 +108,7 @@ export async function runQueryLoop(
 export async function indexAndRunQueryLoop(
   repoId: string,
   chunks: Chunk[],
-  embeddings: Parameters<typeof indexRepo>[2],
+  embeddings: EmbeddedChunk[],
   question: string,
   opts: QueryLoopOptions = {},
 ): Promise<QueryLoopResult> {

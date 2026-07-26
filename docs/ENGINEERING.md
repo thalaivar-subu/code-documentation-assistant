@@ -30,7 +30,7 @@
 ## Engineering standards skipped — deliberately or for time
 
 - **No CI/CD pipeline** — tests are run locally (`npm test`) before every stage is marked done, but there's no GitHub Actions (or equivalent) enforcing this on push. For a real team project this would be the first addition.
-- **No formal retrieval eval harness** — the plan called for a golden question set scored with recall@k/MRR/nDCG; `eval/` exists as a directory but was never populated. Real captured per-stage examples substitute today — honest, but a weaker signal than a repeatable metric.
+- **No formal retrieval eval harness** — the plan called for a golden question set scored with recall@k/MRR/nDCG. The placeholder `eval/` directory was never populated and has since been removed rather than left as dead weight. Real captured per-stage examples substitute today — honest, but a weaker signal than a repeatable metric.
 - **No ports & adapters abstraction**, despite being planned — every stage imports its concrete tool (LanceDB, MiniSearch, `node-llama-cpp`) directly. Documented as a deliberate, acknowledged simplification for a project this size (see `DECISIONS.md`'s drift note on ADR #0009), not an oversight.
 - **No incremental indexing** — re-indexing a repo does a full rescan (cheap only because of content-hash caching and idempotent upserts), not a real `git diff`-based changed-files-only pass.
 - **No auth/authorization on the API** — anyone who can reach `/index` can index a repo; `MAX_INDEXED_REPOS` bounds the blast radius but doesn't gate who can trigger it. Fine for a local demo, a real blocker for anything multi-tenant.

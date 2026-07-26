@@ -43,6 +43,21 @@ A real call graph needs per-language semantic analysis (a language server, or a 
 with import resolution) — genuinely out of scope for this stage. The honest tradeoff: zero extra
 infrastructure, instant, and correct often enough to be useful — not "correct."
 
+## A real bug this stage caught: many callers could crowd out every callee
+
+The per-hit cap (`maxPerHit`, default 3) used to be applied by concatenating callers then callees
+into one list, THEN slicing to `maxPerHit`: `[...callers, ...callees].slice(0, maxPerHit)`. A hit
+with 5 callers and 0-or-more callees would fill the entire cap with callers — the callees never got
+a chance, silently contradicting this stage's own "callers AND callees" doc comment. Caught during
+a design review (docs/REFACTOR-PLAN.md #22), not by a user report — the existing tests only checked
+`maxPerHit` against caller-only fixtures, so a hit with BOTH many callers and a real callee was never
+exercised.
+
+Fixed by round-robin interleaving the two lists before capping, instead of concatenating. Regression
+test (`expand.test.ts`, "does not let a hit with many callers crowd out its callees"): a hit with 5
+callers and 1 callee, `maxPerHit: 3` — before the fix, the callee never appeared; after, it does
+alongside a mix of callers.
+
 ## Why this stage exists at all
 
 Stage 2 (Chunk), Stage 2/Retrieve, and Stage 4/Rerank's own READMEs all flagged the same gap

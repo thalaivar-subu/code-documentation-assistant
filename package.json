@@ -21,6 +21,7 @@
     "generate": "tsx src/scripts/generate.ts",
     "ask": "tsx src/scripts/ask.ts",
     "serve": "tsx src/scripts/serve.ts",
+    "cost:report": "tsx src/scripts/cost-report.ts",
     "web:dev": "vite --config web/vite.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
