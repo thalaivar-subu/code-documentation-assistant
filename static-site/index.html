@@ -27,6 +27,7 @@
         --highlight-ink: #6d3bd1;
         --good: #047857;
         --bad: #be123c;
+        --warn: #b45309;
         --mono-bg: #ffffff;
         --shadow: 0 2px 10px rgba(109, 59, 209, 0.1);
         --sans:
@@ -91,13 +92,13 @@
       }
 
       .wrap {
-        max-width: 760px;
+        max-width: 1040px;
         margin: 0 auto;
         padding: 0 24px;
       }
 
       .wrap-wide {
-        max-width: 980px;
+        max-width: 1040px;
         margin: 0 auto;
         padding: 0 24px;
       }
@@ -109,7 +110,7 @@
         align-items: center;
         justify-content: space-between;
         padding: 20px 24px;
-        max-width: 980px;
+        max-width: 1040px;
         margin: 0 auto;
         border-bottom: 1px solid var(--line);
       }
@@ -300,6 +301,123 @@
         }
       }
 
+      /* ── Pipeline section layout: main content + quick-reference sidebar ── */
+
+      .pipeline-layout {
+        display: flex;
+        align-items: flex-start;
+        gap: 28px;
+      }
+
+      .pipeline-main {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .pipeline-aside {
+        flex: none;
+        width: 240px;
+        position: sticky;
+        top: 20px;
+      }
+
+      @media (max-width: 900px) {
+        .pipeline-layout {
+          flex-direction: column;
+        }
+        .pipeline-aside {
+          width: 100%;
+          position: static;
+        }
+      }
+
+      /* ── Quick-reference flowchart (static, non-interactive) ─────────────── */
+
+      .quickref {
+        background: var(--paper-raised);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+      }
+
+      .quickref-label {
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--ink-muted);
+        margin: 0 0 14px;
+      }
+
+      .quickref-group {
+        margin-bottom: 16px;
+      }
+      .quickref-group:last-of-type {
+        margin-bottom: 0;
+      }
+
+      .quickref-group-label {
+        display: block;
+        font-size: 0.66rem;
+        font-weight: 600;
+        color: var(--ink-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 8px;
+      }
+
+      .quickref-col {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .quickref-node {
+        position: relative;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 0.78rem;
+        font-weight: 500;
+        text-align: center;
+      }
+
+      .quickref-tool {
+        display: block;
+        margin-top: 1px;
+        font-size: 0.64rem;
+        font-weight: 400;
+        font-family: var(--mono-font);
+        color: var(--ink-muted);
+      }
+
+      .quickref-node-loop {
+        border-color: var(--warn);
+      }
+
+      .quickref-loop-tag {
+        display: block;
+        margin-top: 2px;
+        font-size: 0.62rem;
+        font-weight: 600;
+        color: var(--warn);
+      }
+
+      .quickref-arrow {
+        align-self: center;
+        color: var(--line-strong);
+        font-size: 0.75rem;
+        line-height: 1.6;
+      }
+
+      .quickref-note {
+        margin: 4px 0 0;
+        font-size: 0.72rem;
+        color: var(--ink-muted);
+        line-height: 1.5;
+      }
+
       /* ── Pipeline flow ────────────────────────────────────────────────── */
 
       .pipeline-block {
@@ -372,6 +490,21 @@
       }
       .stage-chip .num::after {
         content: '✓';
+      }
+      .stage-chip.active .num {
+        background: none;
+        border: 2px solid var(--accent);
+        border-top-color: transparent;
+        animation: spin 0.7s linear infinite;
+      }
+      .stage-chip.active .num::after {
+        content: '';
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
 
       .flow-arrow {
@@ -544,6 +677,7 @@
       @media (prefers-reduced-motion: reduce) {
         * {
           transition: none !important;
+          animation: none !important;
         }
       }
     </style>
@@ -673,21 +807,93 @@
           isn't enough. Every output below is real, copy-pasted from an actual run.
         </p>
 
-        <div class="pipeline-block">
-          <p class="pipeline-label"><strong>Ingest</strong> — offline, once per repo</p>
-          <div class="flow" id="flow-ingest"></div>
-        </div>
+        <div class="pipeline-layout">
+          <div class="pipeline-main">
+            <div class="pipeline-block">
+              <p class="pipeline-label"><strong>Ingest</strong> — offline, once per repo</p>
+              <div class="flow" id="flow-ingest"></div>
+            </div>
 
-        <div class="pipeline-block">
-          <p class="pipeline-label"><strong>Query</strong> — online, once per question</p>
-          <div class="flow" id="flow-query"></div>
-          <p class="loop-note">
-            <span class="glyph">↻</span> Grade can send the loop back to Retrieve — see stage 6 for
-            a real 2-hop example.
-          </p>
-        </div>
+            <div class="pipeline-block">
+              <p class="pipeline-label"><strong>Query</strong> — online, once per question</p>
+              <div class="flow" id="flow-query"></div>
+              <p class="loop-note">
+                <span class="glyph">↻</span> Grade can send the loop back to Retrieve — see stage 6
+                for a real 2-hop example.
+              </p>
+            </div>
 
-        <div class="detail" id="detail"></div>
+            <div class="detail" id="detail"></div>
+          </div>
+
+          <aside class="pipeline-aside">
+            <div class="quickref">
+              <p class="quickref-label">Quick reference</p>
+
+              <div class="quickref-group">
+                <span class="quickref-group-label">Ingest — once per repo</span>
+                <div class="quickref-col">
+                  <div class="quickref-node">
+                    Clone<span class="quickref-tool">simple-git</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">
+                    Chunk<span class="quickref-tool">tree-sitter (AST)</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">
+                    Embed<span class="quickref-tool">Transformers.js</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">
+                    Index<span class="quickref-tool">LanceDB + MiniSearch</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="quickref-group">
+                <span class="quickref-group-label">Query — per question</span>
+                <div class="quickref-col">
+                  <div class="quickref-node">
+                    Route<span class="quickref-tool">regex heuristics</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">
+                    Retrieve<span class="quickref-tool">dense + BM25</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">Fuse<span class="quickref-tool">RRF</span></div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">
+                    Rerank<span class="quickref-tool">bge-reranker</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">
+                    Expand<span class="quickref-tool">symbol graph</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node quickref-node-loop">
+                    Grade<span class="quickref-tool">score heuristic</span
+                    ><span class="quickref-loop-tag">↺ retrieve</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">
+                    Generate<span class="quickref-tool">local LLM (llama.cpp)</span>
+                  </div>
+                  <span class="quickref-arrow" aria-hidden="true">↓</span>
+                  <div class="quickref-node">
+                    Verify<span class="quickref-tool">citation check</span>
+                  </div>
+                </div>
+              </div>
+
+              <p class="quickref-note">
+                Grade is the one deliberate loop — it decides whether to answer or fetch another
+                round of context.
+              </p>
+            </div>
+          </aside>
+        </div>
       </section>
 
       <hr class="rule" />

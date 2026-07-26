@@ -80,6 +80,7 @@ Prepping for the discussion? **[docs/INTERVIEW-QA.md](./docs/INTERVIEW-QA.md)**.
 Curious what building this actually cost in tokens? **[docs/COST.md](./docs/COST.md)**.
 How would this run on AWS/GCP/Azure/Cloudflare for real? **[docs/PRODUCTIONIZE.md](./docs/PRODUCTIONIZE.md)**.
 What engineering standards did this actually follow (and skip)? **[docs/ENGINEERING.md](./docs/ENGINEERING.md)**.
+What does it actually answer well — and where does it fail? **[docs/EXAMPLE-QUESTIONS.md](./docs/EXAMPLE-QUESTIONS.md)** — 8 real runs across every intent, including 3 real failure modes kept in on purpose.
 
 ---
 
